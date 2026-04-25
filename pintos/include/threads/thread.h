@@ -107,6 +107,9 @@ struct thread {
 	/* Owned by thread.c. */
 	struct intr_frame tf;               /* Information for switching */
 	unsigned magic;                     /* Detects stack overflow. */
+
+	/* Timer에서 쓸 변수 */
+	int64_t wakeup_tick;				/* block된 스레드가 언제 깨는지 확인 */
 };
 
 /* If false (default), use round-robin scheduler.
