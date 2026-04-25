@@ -28,7 +28,13 @@ RUN echo "jungle ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/jungle
 USER jungle
 WORKDIR /home/jungle
 
-RUN echo "source /workspaces/pintos_22.04_lab_docker/pintos/activate" >> /home/jungle/.bashrc
+RUN printf '%s\n' \
+    'for f in /workspaces/*/pintos/activate; do' \
+    '  if [ -f "$f" ]; then' \
+    '    . "$f"' \
+    '    break' \
+    '  fi' \
+    'done' >> /home/jungle/.bashrc
 
 # Clone the repository
 # RUN git clone https://github.com/casys-kaist/pintos-kaist /home/jungle/pintos

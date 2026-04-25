@@ -24,6 +24,20 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
+// 잠든 스레드들을 깨울 시각 순서대로 저장하는 리스트
+static struct list sleep_list;
+
+// wakeup_tick 기준으로 정렬하기 위한 비교 함수
+static bool
+wakeup_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+	// TODO: wakeup_tick이 더 작은 스레드가 앞에 오도록 비교
+	// elem을 가지고 있는 struct thread 비교
+	struct thread *ta = list_entry(a, struct thread, elem);
+    struct thread *tb = list_entry(b, struct thread, elem);
+
+    return ta->wakeup_tick < tb->wakeup_tick;
+}
 static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
@@ -42,6 +56,9 @@ timer_init (void) {
 	outb (0x40, count & 0xff);
 	outb (0x40, count >> 8);
 
+	// 타이머 인터럽트가 동작하기 전에 sleep list 초기화
+	list_init(&sleep_list);
+	
 	intr_register_ext (0x20, timer_interrupt, "8254 Timer");
 }
 
@@ -90,11 +107,30 @@ timer_elapsed (int64_t then) {
 /* Suspends execution for approximately TICKS timer ticks. */
 void
 timer_sleep (int64_t ticks) {
-	int64_t start = timer_ticks ();
+	enum intr_level old_level;
+	struct thread *cur;
 
 	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+
+	// 0 이하의 tick은 바로 반환
+	if (ticks <= 0) {
+		return;
+	}
+	
+	// sleep list 삽입과 block을 원자적으로 처리하기 위해 인터럽트 비활성화 */
+	old_level = intr_disable ();
+	cur = thread_current ();
+
+	// 현재 스레드가 깨어날 tick 기록
+	cur->wakeup_tick = timer_ticks () + ticks;
+
+	// TODO: wakeup_tick 기준으로 sleep_list에 정렬 삽입
+	list_insert_ordered (&sleep_list, &cur->elem, wakeup_less, NULL);
+	
+	// TODO: 현재 스레드를 block 상태로 전환
+	thread_block();
+
+	intr_set_level (old_level);
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -125,6 +161,18 @@ timer_print_stats (void) {
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
+
+	// TODO: 깨어날 시간이 된 sleeping thread를 순서대로 깨우기
+	while (!list_empty (&sleep_list)) {
+        struct thread *t = list_entry (list_front (&sleep_list), struct thread, elem);
+
+        if (t->wakeup_tick > ticks) {
+            break;
+		}
+
+        list_pop_front (&sleep_list);
+        thread_unblock (t);
+    }
 	thread_tick ();
 }
 
