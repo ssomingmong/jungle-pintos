@@ -160,6 +160,8 @@ timer_print_stats (void) {
 /* Timer interrupt handler. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
+	bool should_yield = false;
+
 	ticks++;
 
 	// TODO: 깨어날 시간이 된 sleeping thread를 순서대로 깨우기
@@ -172,7 +174,19 @@ timer_interrupt (struct intr_frame *args UNUSED) {
 
         list_pop_front (&sleep_list);
         thread_unblock (t);
+
+		/* sleep이 끝나 깨어난 스레드 중 현재보다 우선순위가 높은 스레드가 있으면,
+		인터럽트가 끝난 뒤 바로 그 스레드가 실행될 수 있도록 표시 */
+		if (t->priority > thread_current ()->priority) {
+			should_yield = true;
+		}
     }
+	/* 타이머 인터럽트 안에서는 바로 양보하지 않고,
+	인터럽트 복귀 시점에 스케줄링되게 한다. */
+	if (should_yield) {
+		intr_yield_on_return ();
+	}
+
 	thread_tick ();
 }
 

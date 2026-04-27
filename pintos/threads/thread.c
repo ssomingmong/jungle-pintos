@@ -63,6 +63,8 @@ static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
 
+static bool priority_more (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
 
@@ -207,6 +209,11 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
+	/* 새로 만든 스레드가 READY 상태가 된 뒤 현재보다 우선순위가 높으면,
+	현재 스레드는 바로 CPU를 양보 */
+	if (priority > thread_current ()->priority) {
+		thread_yield();
+	}
 	return tid;
 }
 
@@ -240,7 +247,9 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+
+	// BLOCKED 상태의 스레드를 다시 ready 상태로 바꾸고, ready_list에 우선순위 순서대로 넣기
+	list_insert_ordered (&ready_list, &t->elem, priority_more, NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -302,21 +311,47 @@ thread_yield (void) {
 	ASSERT (!intr_context ());
 
 	old_level = intr_disable ();
-	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+	if (curr != idle_thread) {
+		/* 현재 running thread가 CPU를 양보하면 다시 READY 상태로 돌아가므로,
+		이때도 ready_list의 priority 순서를 유지 */
+		list_insert_ordered (&ready_list, &curr->elem, priority_more, NULL);
+	}
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
+// 현재 스레드의 우선순위를 변경하고, 더 높은 우선순위 스레드가 ready 상태면 CPU를 양보
 void
-thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+thread_set_priority (int new_priority) 
+{
+	enum intr_level old_level;
+	struct thread *curr = thread_current ();
+
+	old_level = intr_disable ();
+
+	// 현재 실행 중인 스레드의 우선순위를 변경한다.
+	curr->priority = new_priority;
+
+	/* ready_list는 이미 우선순위 순으로 정렬되어 있으므로,
+	맨 앞 스레만 확인해도 현재보다 더 높은 우선순위가 있는지 알 수 있다. */
+	if (!list_empty (&ready_list))
+	{
+		struct thread *front = list_entry (list_front (&ready_list), struct thread, elem);
+
+		// 우선순위를 낮춘 결과 현재 스레드가 더 이상 최고 우선선위가 아니면 즉시 CPU를 양보해야 한다.
+		if (front->priority > curr->priority) {
+			thread_yield();
+		}
+	}
+
+	intr_set_level (old_level);
 }
 
 /* Returns the current thread's priority. */
 int
 thread_get_priority (void) {
+	// 현재 스레드가 우선순위를 반환한다.
 	return thread_current ()->priority;
 }
 
@@ -587,4 +622,16 @@ allocate_tid (void) {
 	lock_release (&tid_lock);
 
 	return tid;
+}
+
+// ready_list를 항상 높은 우선순위 순서로 유지하기 위한 비교 함수
+static bool
+priority_more(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+	// 리스트 원소에서 실제 스레드를 꺼내 우선순위를 비교
+	struct thread *ta = list_entry(a, struct thread, elem);
+	struct thread *tb = list_entry(b, struct thread, elem);
+
+	// 우선순위 값이 더 큰 스레드가 ready_list 앞에 와야 한다.
+	return ta->priority > tb->priority;
 }

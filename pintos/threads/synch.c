@@ -32,6 +32,15 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+// 세마포어 waiters 중 더 높은 우선순위 스레드가 먼저 깨어나도록 비교
+static bool
+sema_priority_more (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+	struct thread *ta = list_entry (a, struct thread, elem);
+	struct thread *tb = list_entry (b, struct thread, elem);
+
+	return ta->priority > tb->priority;
+}
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -66,6 +75,7 @@ sema_down (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	while (sema->value == 0) {
+		// 세마포어를 얻지 못하면 현재 스레드는 waiters에 등록하고 block 된다
 		list_push_back (&sema->waiters, &thread_current ()->elem);
 		thread_block ();
 	}
@@ -105,15 +115,42 @@ sema_try_down (struct semaphore *sema) {
 void
 sema_up (struct semaphore *sema) {
 	enum intr_level old_level;
+	struct thread *woken = NULL;
+	bool should_yield = false;
 
 	ASSERT (sema != NULL);
 
 	old_level = intr_disable ();
 	if (!list_empty (&sema->waiters))
-		thread_unblock (list_entry (list_pop_front (&sema->waiters),
-					struct thread, elem));
+	{
+		// waiter들 중 가장 높은 우선순위가 스레드가 먼저 깨어나도록 정렬
+		list_sort (&sema->waiters, sema_priority_more, NULL);
+
+		// 가장 높은 우선순위 waiter를 꺼내 READY 상태로 바꾼다.
+		woken = list_entry (list_pop_front (&sema->waiters), struct thread, elem);
+		thread_unblock (woken);
+
+		/* 세마포어를 기다리던 스레드를 깨운 뒤,
+		그 스레드가 현재보다 우선순위가 높으면 CPU를 넘겨야 함 */
+		if (woken->priority > thread_current ()->priority) 
+		{
+			/* 인터럽트 컨텍스트에서는 즉시 양보하지 않고,
+			인터럽트가 끝난 뒤 스케줄링이 일어나도록 예약 */
+			if (intr_context ()) {
+				intr_yield_on_return ();
+			}
+			else {
+				should_yield = true;
+			}
+		}
+	}
 	sema->value++;
 	intr_set_level (old_level);
+
+	// 일반 실행 흐름에서는 여기서 직접 CPU를 양보
+	if (should_yield) {
+		thread_yield ();
+	}
 }
 
 static void sema_test_helper (void *sema_);
@@ -242,6 +279,19 @@ struct semaphore_elem {
 	struct semaphore semaphore;         /* This semaphore. */
 };
 
+/* condition waiters는 thread가 아니라 semaphore_elem을 저장하므로,
+각 waiter 안에서 결국 어떤 우선순위 thread가 깨어나는지를 기준으로 비교 */
+static bool
+cond_priority_more (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+	struct semaphore_elem *sa = list_entry (a, struct semaphore_elem, elem);
+	struct semaphore_elem *sb = list_entry (b, struct semaphore_elem, elem);
+
+	struct thread *ta = list_entry (list_front (&sa->semaphore.waiters), struct thread, elem);
+	struct thread *tb = list_entry (list_front (&sb->semaphore.waiters), struct thread, elem);
+
+	return ta->priority > tb->priority;
+}
 /* Initializes condition variable COND.  A condition variable
    allows one piece of code to signal a condition and cooperating
    code to receive the signal and act upon it. */
@@ -282,6 +332,9 @@ cond_wait (struct condition *cond, struct lock *lock) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	sema_init (&waiter.semaphore, 0);
+	
+	/* 현재 스레드를 condition waiter로 등록하고 잠든다.
+	나중에 cond_signal()이 이 waiter를 선택하면 다시 깨어난다. */
 	list_push_back (&cond->waiters, &waiter.elem);
 	lock_release (lock);
 	sema_down (&waiter.semaphore);
@@ -303,8 +356,14 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	if (!list_empty (&cond->waiters))
+	{
+		// condition waiters 중 우선순위가 가장 높은 waiter를 먼저 깨우도록 정렬
+		list_sort (&cond->waiters, cond_priority_more, NULL);
+
+		// 선택된 waiter의 세마포어를 개워서, 그 waiter와 연결된 스레가 READY 상태가 되게 한다.
 		sema_up (&list_entry (list_pop_front (&cond->waiters),
 					struct semaphore_elem, elem)->semaphore);
+	}
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
