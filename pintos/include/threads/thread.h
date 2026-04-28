@@ -146,4 +146,6 @@ int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
 
+bool priority_sort(struct list_elem *a, struct list_elem *b);
+
 #endif /* threads/thread.h */

@@ -114,7 +114,7 @@ timer_sleep (int64_t ticks) {
 
 	old_level = intr_disable();
 	t->wakeup_tick = start + ticks;
-	list_push_back(&sleep_list, &t->elem);
+	list_insert_ordered(&sleep_list, &t->elem, priority_sort, NULL);
 
 	thread_block();
 	intr_set_level(old_level);
