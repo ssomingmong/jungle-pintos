@@ -92,10 +92,12 @@ struct thread {
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
 	int64_t wakeup_tick;                /* 이 스레드를 깨워야 하는 tick 시각 */
-
+	int64_t base_priority;
+	
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 	struct list_elem sleep_elem;        /* sleep_list에 연결할 때 쓰는 리스트 노드 */
+	struct lock *wait_lock;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
