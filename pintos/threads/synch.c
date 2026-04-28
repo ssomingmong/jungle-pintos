@@ -205,11 +205,37 @@ lock_init (struct lock *lock) {
    we need to sleep. */
 void
 lock_acquire (struct lock *lock) {
+	
+	// lock 포인터가 진짜 있어야 한다.
 	ASSERT (lock != NULL);
+	// 인터럽트 핸들러 문맥에서는 호출하면 안 된다.
 	ASSERT (!intr_context ());
+	// 현재 스레드가 이미 이 lock을 들고 있으면 안 된다. 
 	ASSERT (!lock_held_by_current_thread (lock));
 
+	// 지금 현재 이 lock을 이미 다른 스레드가 들고 있으면, 현재 스레드는 이 lock을 기다릴 가능성이 있다.
+	if(lock->holder != NULL) {
+		// 현재 스레드가 어떤 lock을 기다리는 중인지 기록
+		thread_current()->wait_lock = lock;
+		
+
+		// 만약 현재 스레드의 priority가 lock holder보다 높으면, holder에게 현재 스레드의 priority를 donation한다.
+		if(thread_current()->priority > lock->holder->priority) {
+			lock->holder->priority = thread_current()->priority;
+		}
+	}
+
+	// lock 내부 semaphore를 실제로 얻으려고 시도
+	// lock이 비어있으면 바로 통과
+	// 이미 누가 들고 있으면 현재 스레드 BLOCKED 될 수 있음
 	sema_down (&lock->semaphore);
+
+	// 여기까지 왔다는 것은 현재 스레드가 lock을 얻었다는 뜻
+	// 따라서 현재 스레드의 wait_lock 즉, 기다리고 있는 lock이 없으므로 NULL을 삽입
+	thread_current()->wait_lock = NULL;
+
+	// 이제 이 lock의 공식 holder은 현재 스레드
+	// 즉 lock의 주인을 현재 스래드로 갱신
 	lock->holder = thread_current ();
 }
 
@@ -243,6 +269,8 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
+	// 
+	thread_current()->priority = thread_current()->base_priority;
 	lock->holder = NULL;
 	sema_up (&lock->semaphore);
 }
