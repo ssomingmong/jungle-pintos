@@ -63,6 +63,8 @@ static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
 
+static bool sort_priority (const struct list_elem *a, const struct list_elem *b, void *aux);
+
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
 
@@ -107,7 +109,7 @@ thread_init (void) {
 
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
-	list_init (&ready_list);
+	list_init (&ready_list);	
 	list_init (&destruction_req);
 
 	/* Set up a thread structure for the running thread. */
@@ -205,8 +207,11 @@ thread_create (const char *name, int priority,
 	t->tf.eflags = FLAG_IF;
 
 	/* Add to run queue. */
-	thread_unblock (t);
-
+	thread_unblock (t); 
+	
+	if (thread_current ()->priority < t->priority) {
+		thread_yield();
+	}
 	return tid;
 }
 
@@ -232,6 +237,18 @@ thread_block (void) {
    be important: if the caller had disabled interrupts itself,
    it may expect that it can atomically unblock a thread and
    update other data. */
+
+bool
+sort_priority (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	struct thread *ta = list_entry (a, struct thread, elem);
+	struct thread *tb = list_entry (b, struct thread, elem);
+
+	if (ta->priority > tb->priority) {
+	return true;
+	}
+	return false;
+}
+
 void
 thread_unblock (struct thread *t) {
 	enum intr_level old_level;
@@ -240,10 +257,12 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	list_insert_ordered (&ready_list, &t->elem, sort_priority, NULL);
+	// list_push_back (&ready_list, &t->elem);st_
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
+
 
 /* Returns the name of the running thread. */
 const char *
@@ -302,8 +321,10 @@ thread_yield (void) {
 	ASSERT (!intr_context ());
 
 	old_level = intr_disable ();
-	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+	if (curr != idle_thread) {
+		// list_push_back (&ready_list, &curr->elem);
+	
+	list_insert_ordered (&ready_list, &curr->elem, sort_priority, NULL); }	
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -311,7 +332,13 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	thread_current ()->base_priority = new_priority;
+	if (!list_empty(&ready_list)) {
+	struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
+	if (thread_current ()->priority < t->priority) {
+		thread_yield();
+	}
+	}
 }
 
 /* Returns the current thread's priority. */
@@ -409,6 +436,7 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+	t->base_priority = priority;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
