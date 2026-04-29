@@ -337,6 +337,8 @@ thread_set_priority (int new_priority) {
 	/* 현재 실행 중인 스레드의 기본 priority를 바꾼다. */
 	curr->base_priority = new_priority;
 
+	curr->priority = curr->base_priority;
+
 	if(!list_empty(&ready_list)) {
 		struct thread *front = list_entry(list_front(&ready_list), struct thread, elem);
 
