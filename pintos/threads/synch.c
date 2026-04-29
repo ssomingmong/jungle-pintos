@@ -99,6 +99,13 @@ sema_try_down (struct semaphore *sema) {
 	return success;
 }
 
+bool sema_priority_sort (struct list_elem *a, struct list_elem *b) {
+	struct thread *ta = list_entry(a, struct thread, elem);
+	struct thread *tb = list_entry(b, struct thread, elem);
+	
+	return ta->priority < tb->priority;
+}
+
 /* Up or "V" operation on a semaphore.  Increments SEMA's value
    and wakes up one thread of those waiting for SEMA, if any.
 
@@ -114,8 +121,9 @@ sema_up (struct semaphore *sema) {
 	if (!list_empty (&sema->waiters)) {
 		// thread_unblock (list_entry (list_pop_front (&sema->waiters),
 		// 			struct thread, elem));
-		t = list_entry(list_pop_front (&sema->waiters), struct thread, elem);
-
+		// t = list_entry(list_pop_front (&sema->waiters), struct thread, elem);
+		t = list_entry(list_max(&sema->waiters, sema_priority_sort, NULL), struct thread, elem);
+		list_remove(&t->elem);
 		thread_unblock(t);
 	}
 	sema->value++;
@@ -198,7 +206,32 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
+	struct thread *current = thread_current();
+
+	if (lock->holder) {
+		current->wait_on_lock = lock;
+		list_push_back(&lock->holder->donations, &current->donation_elem);
+		// if (lock->holder->priority < current->priority) {
+		// 	lock->holder->priority = current->priority;
+		// }
+
+		int donor_priority = current->priority;
+    	struct thread *holder = lock->holder;
+
+		while (holder && (donor_priority > holder->priority)) {
+			holder->priority = donor_priority;
+
+			if (!holder->wait_on_lock) {
+				break;
+			}
+
+			holder = holder->wait_on_lock->holder;
+		}
+	}
+
 	sema_down (&lock->semaphore);
+
+	current->wait_on_lock = NULL;
 	lock->holder = thread_current ();
 }
 
@@ -221,6 +254,13 @@ lock_try_acquire (struct lock *lock) {
 	return success;
 }
 
+bool donation_priority_sort (struct list_elem *a, struct list_elem *b) {
+	struct thread *ta = list_entry(a, struct thread, donation_elem);
+	struct thread *tb = list_entry(b, struct thread, donation_elem);
+	
+	return ta->priority < tb->priority;
+}
+
 /* Releases LOCK, which must be owned by the current thread.
    This is lock_release function.
 
@@ -231,6 +271,32 @@ void
 lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
+
+	struct thread *current = thread_current();
+
+	struct list_elem *e = list_begin(&current->donations);
+
+	while (e != list_end(&current->donations)) {
+    	struct list_elem *next = list_next(e);
+
+    	struct thread *donor = list_entry(e, struct thread, donation_elem);
+
+    	if (donor->wait_on_lock == lock) {
+        	list_remove(e);
+		}
+
+    	e = next;
+	}
+
+	current->priority = current->base_priority;
+
+	if (!list_empty(&current->donations)) {
+		struct list_elem *max_elem = list_max(&current->donations, donation_priority_sort, NULL);
+		struct thread *t = list_entry(max_elem, struct thread, donation_elem);
+		if (current->priority < t->priority) {
+			current->priority = t->priority;
+		}
+	}
 
 	lock->holder = NULL;
 	sema_up (&lock->semaphore);

@@ -24,6 +24,8 @@
    Do not modify this value. */
 #define THREAD_BASIC 0xd42df210
 
+#define max(x, y) ((x) > (y) ? (x) : (y))
+
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
@@ -325,7 +327,17 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	struct thread *current = thread_current ();
+	thread_current ()->base_priority = new_priority;
+
+
+	if (list_empty(&current->donations)) {
+		current->priority = new_priority;
+	} else {
+		struct list_elem *max_elem = list_max(&current->donations, donation_priority_sort, NULL);
+		struct thread *t = list_entry(max_elem, struct thread, donation_elem);
+    	current->priority = max(new_priority, t->priority);
+	}
 
 	if (!list_empty(&ready_list) && new_priority < list_entry(list_front(&ready_list), struct thread, elem)->priority) {
 		thread_yield();
@@ -427,6 +439,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+
+	t->base_priority = priority;
+	t->wait_on_lock = NULL;
+	list_init(&t->donations);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

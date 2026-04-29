@@ -92,8 +92,13 @@ struct thread {
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
 
+	int base_priority; /* 실제 우선순위 priority가 donate 받은 priority */
+	struct lock *wait_on_lock; /* 지금 이 스레드가 락을 기다리는 중인지 확인하는 */
+	struct list donations; /* donation한 thread에 대한 list들 */
+
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
+	struct list_elem donation_elem;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
