@@ -96,20 +96,11 @@ struct thread {
 	// 스레드를 깨워야 하는 tick 시점
 	int64_t wakeup_tick;
 
-	int base_priority; /* 실제 우선순위 priority가 donate 받은 priority */
 	struct lock *wait_on_lock; /* 지금 이 스레드가 락을 기다리는 중인지 확인하는 */
 	struct list donations; /* donation한 thread에 대한 list들 */
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
-	struct list_elem donation_elem;
-
-	struct lock *wait_on_lock;			// 현재 기다리고 있는 lock
-	struct list donations;				// 이 스레드에 우선순위를 기부한 스레드들
-	struct list_elem donation_elem;		// donations 리스트에 들어갈 때 사용하는 원소
-
-	struct lock *wait_on_lock;			// 현재 기다리고 있는 lock
-	struct list donations;				// 이 스레드에 우선순위를 기부한 스레드들
 	struct list_elem donation_elem;		// donations 리스트에 들어갈 때 사용하는 원소
 
 #ifdef USERPROG
@@ -124,9 +115,6 @@ struct thread {
 	/* Owned by thread.c. */
 	struct intr_frame tf;               /* Information for switching */
 	unsigned magic;                     /* Detects stack overflow. */
-
-	/* Timer에서 쓸 변수 */
-	int64_t wakeup_tick;				/* block된 스레드가 언제 깨는지 확인 */
 };
 
 /* If false (default), use round-robin scheduler.
