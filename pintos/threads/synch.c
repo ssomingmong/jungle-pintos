@@ -219,13 +219,37 @@ lock_init (struct lock *lock) {
    interrupt handler.  This function may be called with
    interrupts disabled, but interrupts will be turned back on if
    we need to sleep. */
+/* lock을 잡기 전에 holder가 이미 존재하면,
+현재 스레드는 이 lock 때문에 기다리게 된다.
+따라서 현재 스레드를 donor로 등록하고,
+holder 쪽으로 priority donation을 시작. */
 void
 lock_acquire (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
+	if (lock->holder != NULL)
+	{
+		struct thread *curr = thread_current ();
+
+		// nested donation 추적을 위해 현재 기다리는 lock 기록
+		curr->wait_on_lock = lock;
+
+		// 현재 스레드를 holder의 donor 목록에 추가
+		list_push_back (&lock->holder->donations, &curr->donation_elem);
+
+		// 높은 우선순위를 holder에게 전파
+		donate_priority ();
+	}
+
+	// donation을 반영한 뒤 실제로 lock이 풀릴 때까지 기다린다.
 	sema_down (&lock->semaphore);
+
+	// 이제 lock을 얻었으므로 더 이상 기다리는 상태가 아님
+	thread_current ()->wait_on_lock = NULL;
+
+	// 현재 스레드가 이 lock의 새 holder가 된다.
 	lock->holder = thread_current ();
 }
 
@@ -254,12 +278,17 @@ lock_try_acquire (struct lock *lock) {
    An interrupt handler cannot acquire a lock, so it does not
    make sense to try to release a lock within an interrupt
    handler. */
+/* lock을 놓을 때는 이 lock 때문에 들어온 donation만 제거하고,
+남아 있는 donor들을 기준으로 현재 우선순위를 다시 계산해야 함. */
 void
 lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
+	// 이제 이 lock의 holder는 없음
 	lock->holder = NULL;
+
+	// 기다리던 다음 스레드가 lock을 얻을 수 있도록 깨움
 	sema_up (&lock->semaphore);
 }
 
