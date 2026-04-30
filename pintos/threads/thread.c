@@ -333,6 +333,10 @@ thread_yield (void) {
 void
 thread_set_priority (int new_priority) {
 	thread_current ()->base_priority = new_priority;
+	if (thread_current ()-> priority < thread_current ()->base_priority) {
+		thread_current ()->priority = thread_current ()->base_priority; 
+	}
+
 	if (!list_empty(&ready_list)) {
 	struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
 	if (thread_current ()->priority < t->priority) {
@@ -437,6 +441,8 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
 	t->base_priority = priority;
+	list_init(&t->donation_thread);
+	t->wait_on_lock = NULL;
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

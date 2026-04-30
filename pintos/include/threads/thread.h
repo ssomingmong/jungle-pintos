@@ -95,8 +95,9 @@ struct thread {
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
-	// struct list donation_thread; /* donated priority */
-	// struct list_elem elem_donation; /* list elem for donation */
+	struct list donation_thread; /* donated priority */
+	struct lock *wait_on_lock; 
+	struct list_elem elem_donation; /* list elem for donation */
 	int base_priority; /* */
 
 #ifdef USERPROG

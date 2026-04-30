@@ -212,16 +212,34 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
+	struct thread *curr = thread_current();
+
 	if (lock->holder != NULL) {
 
-		if (lock->holder->priority < thread_current ()->priority) {
-			lock->holder->priority = thread_current ()->priority;
+		if (lock->holder->priority < curr->priority) {
+			lock->holder->priority = curr->priority;
 		}
+		list_insert_ordered(&curr->donation_thread, &curr->elem_donation, sort_priority_donation, NULL);
 	}
-
 	sema_down (&lock->semaphore);
 	lock->holder = thread_current ();
 }
+
+
+
+
+
+bool
+sort_priority_donation (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	struct thread *ta = list_entry (a, struct thread, elem_donation);
+	struct thread *tb = list_entry (b, struct thread, elem_donation);
+
+	if (ta->priority > tb->priority) {
+	return true;
+	}
+	return false;
+}
+
 
 /* Tries to acquires LOCK and returns true if successful or false
    on failure.  The lock must not already be held by the current
@@ -253,9 +271,30 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
+	struct thread *t;
+
 	thread_current ()->priority = thread_current ()->base_priority;
 	lock->holder = NULL;
+	// base 로 바꾼다음에 sema_up
+	//donation
+	// while (cur != NULL 
+
 	sema_up (&lock->semaphore);
+
+	if(!list_empty(&thread_current()->donation_thread))
+	{
+	t = list_entry(list_begin(&thread_current()->donation_thread), struct thread, elem_donation); 
+		
+	if (thread_current ()->priority < t->priority)
+		{	
+			thread_current ()->priority = t->priority;
+		}
+	}
+
+	// if (!list_empty(&ready_list) && listlist_entry(list_begin(&ready_list), struct thread, elem)->priority)
+	// {
+	// 	thread_yield();
+	// }
 }
 
 /* Returns true if the current thread holds LOCK, false
@@ -342,7 +381,6 @@ max_priority(const struct list_elem *a, const struct list_elem *b, void *aux) {
 		return true;
 	}
 	return false;
-
 } 
 
 void
