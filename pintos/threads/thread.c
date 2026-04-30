@@ -345,16 +345,17 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->base_priority = new_priority;
-	if (thread_current ()-> priority < thread_current ()->base_priority) {
-		thread_current ()->priority = thread_current ()->base_priority; 
-	}
+	struct thread *curr = thread_current ();
 
-	if (!list_empty(&ready_list)) {
-	struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
-	if (thread_current ()->priority < t->priority) {
-		thread_yield();
-	}
+	curr->base_priority = new_priority;
+	curr->priority = new_priority;
+
+	if (!list_empty (&ready_list)) {
+		struct thread *front =
+			list_entry (list_front (&ready_list), struct thread, elem);
+
+		if (front->priority > curr->priority)
+			thread_yield ();
 	}
 }
 
