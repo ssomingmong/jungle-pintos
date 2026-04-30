@@ -28,6 +28,9 @@ static intr_handler_func timer_interrupt;
 static bool too_many_loops(unsigned loops);
 static void busy_wait(int64_t loops);
 static void real_time_sleep(int64_t num, int32_t denom);
+static void timer_sleeplist(int64_t ticks);
+static bool sort_wakeup_tick(const struct list_elem *a, const struct list_elem *b, void *aux);
+static void thread_wakeup(void);
 
 static struct list sleep_list;        /* timer_sleep()으로 잠든 스레드 목록 */
 
@@ -117,40 +120,41 @@ timer_sleeplist(int64_t ticks) {
 	t->wakeup_tick = timer_ticks() + ticks;
 
 	list_insert_ordered (&sleep_list, &t->elem, sort_wakeup_tick, NULL);
-  thread_block();
+	thread_block();
 
 	intr_set_level (old_level);
-  }
+}
 
 bool
 sort_wakeup_tick (const struct list_elem *a, const struct list_elem *b, void *aux) {
-  struct thread *ta = list_entry (a, struct thread, elem);
-  struct thread *tb = list_entry (b, struct thread, elem);
+	struct thread *ta = list_entry (a, struct thread, elem);
+	struct thread *tb = list_entry (b, struct thread, elem);
 
-  if (ta->wakeup_tick < tb->wakeup_tick) {
-   return true;
+	if (ta->wakeup_tick < tb->wakeup_tick) {
+		return true;
 	}
-  else {
-   return false;
-  }
+	else {
+		return false;
+	}
 }
 
 void
 thread_wakeup (void) {
-  if (list_empty (&sleep_list)) {
+	if (list_empty (&sleep_list)) {
 		return;
 	}
 	while (!list_empty (&sleep_list)) {
 
-  struct thread *t = list_entry (list_begin(&sleep_list), struct thread, elem);
+		struct thread *t = list_entry (list_begin(&sleep_list), struct thread, elem);
 
-	if (t->wakeup_tick <= timer_ticks()) {
-	list_pop_front (&sleep_list);
-  thread_unblock(t);}
+		if (t->wakeup_tick <= timer_ticks()) {
+			list_pop_front (&sleep_list);
+			thread_unblock(t);
+		}
 
-	else {
-		break;
-	}
+		else {
+			break;
+		}
 	}
 }
 
@@ -182,8 +186,6 @@ void timer_print_stats(void)
 static void
 timer_interrupt(struct intr_frame *args UNUSED)
 {
-	struct list_elem *e;
-
 	ticks++;
 	thread_tick ();
 	thread_wakeup();

@@ -39,6 +39,7 @@ static bool sort_priority (const struct list_elem *a, const struct list_elem *b,
 /* thread waiters를 높은 priority 순으로 유지하기 위한 비교 함수. */
 static bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 static bool cmp_sema_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+static bool sort_priority_donation (const struct list_elem *a, const struct list_elem *b, void *aux);
 
 /* 두 thread waiter를 priority로 비교한다. */
 static bool
@@ -137,26 +138,24 @@ sema_try_down (struct semaphore *sema) {
 void
 sema_up (struct semaphore *sema) {
 	enum intr_level old_level;
+	struct thread *wakeup = NULL;
+
 	ASSERT (sema != NULL);
 	old_level = intr_disable ();
 
 	sema->value++;
 	if (!list_empty (&sema->waiters)) {
-		struct thread *t = list_entry (list_pop_front (&sema->waiters), struct thread, elem);
-		thread_unblock (t);			
-
-	if (thread_current ()->priority < t->priority) {
-		if (intr_context()== true) {
-				intr_yield_on_return();
-		} else {
-		thread_yield();
+		wakeup = list_entry (list_pop_front (&sema->waiters), struct thread, elem);
+		thread_unblock (wakeup);
 	}
-}}
 	intr_set_level (old_level);
 
 	/* 방금 깨운 스레드가 더 높으면 현재 스레드가 바로 양보한다. */
 	if(wakeup != NULL && thread_current()->priority < wakeup->priority) {
-		thread_yield();
+		if (intr_context ())
+			intr_yield_on_return ();
+		else
+			thread_yield();
 	}
 }
 
