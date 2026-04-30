@@ -52,6 +52,9 @@ timer_init (void) {
 	   nearest. */
 	uint16_t count = (1193180 + TIMER_FREQ / 2) / TIMER_FREQ;
 
+	/* sleep_list 초기화 */
+	list_init(&sleep_list);
+
 	outb (0x43, 0x34);    /* CW: counter 0, LSB then MSB, mode 2, binary. */
 	outb (0x40, count & 0xff);
 	outb (0x40, count >> 8);

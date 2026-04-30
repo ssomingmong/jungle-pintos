@@ -24,6 +24,8 @@
    Do not modify this value. */
 #define THREAD_BASIC 0xd42df210
 
+#define max(x, y) ((x) > (y) ? (x) : (y))
+
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
@@ -214,9 +216,8 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
-	/* 새로 만든 스레드가 READY 상태가 된 뒤 현재보다 우선순위가 높으면,
-	현재 스레드는 바로 CPU를 양보 */
-	if (priority > thread_current ()->priority) {
+	struct thread *cur = thread_current();
+	if (t->priority > cur->priority) {
 		thread_yield();
 	}
 	return tid;
@@ -234,6 +235,15 @@ thread_block (void) {
 	ASSERT (intr_get_level () == INTR_OFF);
 	thread_current ()->status = THREAD_BLOCKED;
 	schedule ();
+}
+
+/* 우선순위대로 ready_list에 넣어보기 
+   그러기 위해서는 함수를 만들어야 함. */
+bool priority_sort(struct list_elem *a, struct list_elem *b) {
+	struct thread *ta = list_entry(a, struct thread, elem);
+	struct thread *tb = list_entry(b, struct thread, elem);
+	
+	return ta->priority > tb->priority;
 }
 
 /* Transitions a blocked thread T to the ready-to-run state.
@@ -458,6 +468,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 	list_init (&t->donations);
 
 	t->magic = THREAD_MAGIC;
+
+	t->base_priority = priority;
+	t->wait_on_lock = NULL;
+	list_init(&t->donations);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

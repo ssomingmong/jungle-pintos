@@ -75,8 +75,8 @@ sema_down (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	while (sema->value == 0) {
-		// 세마포어를 얻지 못하면 현재 스레드는 waiters에 등록하고 block 된다
-		list_push_back (&sema->waiters, &thread_current ()->elem);
+		// list_push_back (&sema->waiters, &thread_current ()->elem);
+		list_insert_ordered(&sema->waiters, &thread_current ()->elem, priority_sort, NULL);
 		thread_block ();
 	}
 	sema->value--;
@@ -106,6 +106,13 @@ sema_try_down (struct semaphore *sema) {
 	intr_set_level (old_level);
 
 	return success;
+}
+
+bool sema_priority_sort (struct list_elem *a, struct list_elem *b) {
+	struct thread *ta = list_entry(a, struct thread, elem);
+	struct thread *tb = list_entry(b, struct thread, elem);
+	
+	return ta->priority < tb->priority;
 }
 
 /* Up or "V" operation on a semaphore.  Increments SEMA's value
@@ -272,6 +279,13 @@ lock_try_acquire (struct lock *lock) {
 	return success;
 }
 
+bool donation_priority_sort (struct list_elem *a, struct list_elem *b) {
+	struct thread *ta = list_entry(a, struct thread, donation_elem);
+	struct thread *tb = list_entry(b, struct thread, donation_elem);
+	
+	return ta->priority < tb->priority;
+}
+
 /* Releases LOCK, which must be owned by the current thread.
    This is lock_release function.
 
@@ -284,6 +298,32 @@ void
 lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
+
+	struct thread *current = thread_current();
+
+	struct list_elem *e = list_begin(&current->donations);
+
+	while (e != list_end(&current->donations)) {
+    	struct list_elem *next = list_next(e);
+
+    	struct thread *donor = list_entry(e, struct thread, donation_elem);
+
+    	if (donor->wait_on_lock == lock) {
+        	list_remove(e);
+		}
+
+    	e = next;
+	}
+
+	current->priority = current->base_priority;
+
+	if (!list_empty(&current->donations)) {
+		struct list_elem *max_elem = list_max(&current->donations, donation_priority_sort, NULL);
+		struct thread *t = list_entry(max_elem, struct thread, donation_elem);
+		if (current->priority < t->priority) {
+			current->priority = t->priority;
+		}
+	}
 
 	// 이제 이 lock의 holder는 없음
 	lock->holder = NULL;
