@@ -116,7 +116,7 @@ thread_init (void) {
 
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
-	list_init (&ready_list);
+	list_init (&ready_list);	
 	list_init (&destruction_req);
 
 	/* Set up a thread structure for the running thread. */
@@ -189,6 +189,7 @@ tid_t
 thread_create (const char *name, int priority,
 		thread_func *function, void *aux) {
 	struct thread *t;
+	
 	tid_t tid;
 
 	ASSERT (function != NULL);
@@ -216,8 +217,8 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
-	struct thread *cur = thread_current();
-	if (t->priority > cur->priority) {
+	/* 더 높은 priority 스레드를 만들었다면 바로 CPU를 넘긴다. */
+	if(thread_current()->priority < t->priority) {
 		thread_yield();
 	}
 	return tid;
@@ -254,6 +255,18 @@ bool priority_sort(struct list_elem *a, struct list_elem *b) {
    be important: if the caller had disabled interrupts itself,
    it may expect that it can atomically unblock a thread and
    update other data. */
+
+bool
+sort_priority (const struct list_elem *a, const struct list_elem *b, void *aux) {
+	struct thread *ta = list_entry (a, struct thread, elem);
+	struct thread *tb = list_entry (b, struct thread, elem);
+
+	if (ta->priority > tb->priority) {
+	return true;
+	}
+	return false;
+}
+
 void
 thread_unblock (struct thread *t) {
 	enum intr_level old_level;
@@ -269,10 +282,21 @@ thread_unblock (struct thread *t) {
 	intr_set_level (old_level);
 }
 
+
 /* Returns the name of the running thread. */
 const char *
 thread_name (void) {
 	return thread_current ()->name;
+}
+
+/* 두 ready_list 원소를 priority로 비교한다.
+   list에는 elem만 들어 있으므로 원래 thread로 복원한 뒤 비교한다.
+   priority가 큰 스레드가 ready_list 앞쪽에 오게 만든다. */
+bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
+	struct thread *ta = list_entry(a, struct thread, elem);
+	struct thread *tb = list_entry(b, struct thread, elem);
+
+	return ta->priority > tb -> priority;
 }
 
 /* Returns the running thread.
