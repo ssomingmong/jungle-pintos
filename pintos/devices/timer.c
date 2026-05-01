@@ -44,9 +44,6 @@ static void busy_wait(int64_t loops);
 static void real_time_sleep(int64_t num, int32_t denom);
 static void timer_sleeplist(int64_t ticks);
 static bool sort_wakeup_tick(const struct list_elem *a, const struct list_elem *b, void *aux);
-static void thread_wakeup(void);
-
-static struct list sleep_list;        /* timer_sleep()으로 잠든 스레드 목록 */
 
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
@@ -199,7 +196,6 @@ timer_interrupt (struct intr_frame *args UNUSED) {
 	}
 
 	thread_tick ();
-	thread_wakeup();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
