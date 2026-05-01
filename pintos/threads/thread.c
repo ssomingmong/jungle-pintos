@@ -116,7 +116,7 @@ thread_init (void) {
 
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
-	list_init (&ready_list);
+	list_init (&ready_list);	
 	list_init (&destruction_req);
 
 	/* Set up a thread structure for the running thread. */
@@ -189,6 +189,7 @@ tid_t
 thread_create (const char *name, int priority,
 		thread_func *function, void *aux) {
 	struct thread *t;
+	
 	tid_t tid;
 
 	ASSERT (function != NULL);
@@ -216,8 +217,8 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
-	struct thread *cur = thread_current();
-	if (t->priority > cur->priority) {
+	/* 더 높은 priority 스레드를 만들었다면 바로 CPU를 넘긴다. */
+	if(thread_current()->priority < t->priority) {
 		thread_yield();
 	}
 	return tid;
@@ -239,13 +240,6 @@ thread_block (void) {
 
 /* 우선순위대로 ready_list에 넣어보기 
    그러기 위해서는 함수를 만들어야 함. */
-bool priority_sort(struct list_elem *a, struct list_elem *b) {
-	struct thread *ta = list_entry(a, struct thread, elem);
-	struct thread *tb = list_entry(b, struct thread, elem);
-	
-	return ta->priority > tb->priority;
-}
-
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
    make the running thread ready.)
@@ -254,6 +248,7 @@ bool priority_sort(struct list_elem *a, struct list_elem *b) {
    be important: if the caller had disabled interrupts itself,
    it may expect that it can atomically unblock a thread and
    update other data. */
+
 void
 thread_unblock (struct thread *t) {
 	enum intr_level old_level;
@@ -269,12 +264,16 @@ thread_unblock (struct thread *t) {
 	intr_set_level (old_level);
 }
 
+
 /* Returns the name of the running thread. */
 const char *
 thread_name (void) {
 	return thread_current ()->name;
 }
 
+/* 두 ready_list 원소를 priority로 비교한다.
+   list에는 elem만 들어 있으므로 원래 thread로 복원한 뒤 비교한다.
+   priority가 큰 스레드가 ready_list 앞쪽에 오게 만든다. */
 /* Returns the running thread.
    This is running_thread() plus a couple of sanity checks.
    See the big comment at the top of thread.h for details. */
@@ -361,6 +360,7 @@ thread_set_priority (int new_priority)
 		}
 	}
 
+	thread_yield_if_not_highest ();
 	intr_set_level (old_level);
 }
 
@@ -468,10 +468,6 @@ init_thread (struct thread *t, const char *name, int priority) {
 	list_init (&t->donations);
 
 	t->magic = THREAD_MAGIC;
-
-	t->base_priority = priority;
-	t->wait_on_lock = NULL;
-	list_init(&t->donations);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -751,5 +747,17 @@ donate_priority (void)
 
 		curr = holder;
 		depth++;
+	}
+}
+
+void
+thread_yield_if_not_highest (void)
+{
+	if (!intr_context () && !list_empty (&ready_list))
+	{
+		struct thread *front = list_entry (list_front (&ready_list), struct thread, elem);
+		if (front->priority > thread_current ()->priority) {
+			thread_yield ();
+		}
 	}
 }
