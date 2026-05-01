@@ -71,20 +71,6 @@ sema_init (struct semaphore *sema, unsigned value) {
    thread will probably turn interrupts back on. This is
    sema_down function. */
 
-bool
-sort_priority (const struct list_elem *a, const struct list_elem *b, void *aux) {
-	struct thread *ta = list_entry (a, struct thread, elem);
-	struct thread *tb = list_entry (b, struct thread, elem);
-
-	if (ta->priority > tb->priority) {
-	return true;
-	}
-	else {
-	return false;
-	}
-}
-
-
 void
 sema_down (struct semaphore *sema) {
 	enum intr_level old_level;
@@ -127,11 +113,12 @@ sema_try_down (struct semaphore *sema) {
 	return success;
 }
 
-bool sema_priority_sort (struct list_elem *a, struct list_elem *b) {
+static bool
+sema_priority_more (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
 	struct thread *ta = list_entry(a, struct thread, elem);
 	struct thread *tb = list_entry(b, struct thread, elem);
 	
-	return ta->priority < tb->priority;
+	return ta->priority > tb->priority;
 }
 
 /* Up or "V" operation on a semaphore.  Increments SEMA's value
@@ -170,10 +157,6 @@ sema_up (struct semaphore *sema) {
 		}
 	}
 	sema->value++;
-	if (!list_empty (&sema->waiters)) {
-		wakeup = list_entry (list_pop_front (&sema->waiters), struct thread, elem);
-		thread_unblock (wakeup);
-	}
 	intr_set_level (old_level);
 
 	// 일반 실행 흐름에서는 여기서 직접 CPU를 양보
@@ -290,18 +273,6 @@ lock_acquire (struct lock *lock) {
 
 
 
-bool
-sort_priority_donation (const struct list_elem *a, const struct list_elem *b, void *aux) {
-	struct thread *ta = list_entry (a, struct thread, elem_donation);
-	struct thread *tb = list_entry (b, struct thread, elem_donation);
-
-	if (ta->priority > tb->priority) {
-	return true;
-	}
-	return false;
-}
-
-
 /* Tries to acquires LOCK and returns true if successful or false
    on failure.  The lock must not already be held by the current
    thread.
@@ -321,13 +292,6 @@ lock_try_acquire (struct lock *lock) {
 	return success;
 }
 
-bool donation_priority_sort (struct list_elem *a, struct list_elem *b) {
-	struct thread *ta = list_entry(a, struct thread, donation_elem);
-	struct thread *tb = list_entry(b, struct thread, donation_elem);
-	
-	return ta->priority < tb->priority;
-}
-
 /* Releases LOCK, which must be owned by the current thread.
    This is lock_release function.
 
@@ -341,10 +305,14 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
-	struct thread *current = thread_current();
+	remove_with_lock (lock);
+	refresh_priority ();
+	lock->holder = NULL;
+	sema_up (&lock->semaphore);
+	thread_yield_if_not_highest ();
+	return;
 
-	struct list_elem *e = list_begin(&current->donations);
-
+#if 0
 	while (e != list_end(&current->donations)) {
     	struct list_elem *next = list_next(e);
 
@@ -361,7 +329,7 @@ lock_release (struct lock *lock) {
 
 	if (!list_empty(&current->donations)) {
 		struct list_elem *max_elem = list_max(&current->donations, donation_priority_sort, NULL);
-		struct thread *t = list_entry(max_elem, struct thread, donation_elem);
+		t = list_entry(max_elem, struct thread, donation_elem);
 		if (current->priority < t->priority) {
 			current->priority = t->priority;
 		}
@@ -373,9 +341,9 @@ lock_release (struct lock *lock) {
 	// 기다리던 다음 스레드가 lock을 얻을 수 있도록 깨움
 	sema_up (&lock->semaphore);
 
-	if(!list_empty(&thread_current()->donation_thread))
+	if(!list_empty(&thread_current()->donations))
 	{
-	t = list_entry(list_begin(&thread_current()->donation_thread), struct thread, elem_donation); 
+	t = list_entry(list_begin(&thread_current()->donations), struct thread, donation_elem); 
 		
 	if (thread_current ()->priority < t->priority)
 		{	
@@ -387,6 +355,7 @@ lock_release (struct lock *lock) {
 	// {
 	// 	thread_yield();
 	// }
+#endif
 }
 
 /* Returns true if the current thread holds LOCK, false
