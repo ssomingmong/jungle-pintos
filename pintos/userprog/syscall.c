@@ -40,7 +40,7 @@ syscall_init (void) {
 
 /* The main system call interface */
 void
-syscall_handler (struct intr_frame *f UNUSED) {
+syscall_handler (struct intr_frame *f) {
 	/* f->R.rax 에는 유저 프로그램이 요청한 syscall 번호가 들어 있다.
 	 * 이 번호를 기준으로 어떤 작업을 할지 분기한다. */
 	switch(f->R.rax){
