@@ -39,8 +39,36 @@ syscall_init (void) {
 
 /* The main system call interface */
 void
-syscall_handler (struct intr_frame *f UNUSED) {
-	// TODO: Your implementation goes here.
-	printf ("system call!\n");
-	thread_exit ();
+syscall_handler (struct intr_frame *f) {
+	switch (f->R.rax)
+	{
+	// 운영체제 즉시 종료
+	case SYS_HALT:
+		power_off ();
+		break;
+
+	// 현재 프로세스 종료
+	case SYS_EXIT:
+		thread_exit ();
+		break;
+
+	case SYS_WRITE:
+		if ((int) f->R.rdi == 1) 
+		{
+			// buffer 내용을 size만큼 출력
+			putbuf ((const void *) f->R.rsi, (unsigned) f->R.rdx);
+
+			// 출력한 바이트 수 반환
+			f->R.rax = (unsigned) f->R.rdx;
+		} 
+		else {
+			f->R.rax = -1;
+		}
+		break;
+	
+	default:
+		printf ("system call!\n");
+		thread_exit ();	
+		break;
+	}
 }
