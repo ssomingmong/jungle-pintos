@@ -7,8 +7,6 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
-
-#include "threads/init.h"
 #include "lib/kernel/stdio.h"
 
 void syscall_entry (void);
@@ -43,33 +41,50 @@ syscall_init (void) {
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f) {
-	// 왜 rax를 쓰는가? -> rax에 무슨 syscall인지 넣어둔다.
-	switch  (f->R.rax) {
+	/* f->R.rax 에는 유저 프로그램이 요청한 syscall 번호가 들어 있다.
+	 * 이 번호를 기준으로 어떤 작업을 할지 분기한다. */
+	switch(f->R.rax){
 		case SYS_HALT:
-			power_off ();
+			/* halt()는 현재 프로세스만 끝내는 것이 아니라
+			 * Pintos 자체를 종료하는 시스템콜이다. */
+			power_off();
 			break;
 
 		case SYS_EXIT:
-			thread_exit ();
+			/* exit()는 현재 유저 프로그램을 종료한다.
+			 * 지금 첫 단계에서는 간단히 thread_exit()만 호출한다. */
+			thread_exit();
 			break;
 
 		case SYS_WRITE:
-			// rdi는 fd 몇번인지 알려주는 레지스터. fd 1은 stdout
-			if (f->R.rdi == 1) {
-				// rsi는 버퍼 주소, rdx는 바이트 수
-				putbuf((char *)f->R.rsi, f->R.rdx);
-				// write의 반환값을 size로 설정. 그래야 반환값 역할을 할 수 있음.
-				// 정확히는 size 만큼의 바이트를 반환한다는 의미가 된다. (실제로 쓴 바이트 수 반환)
-				f->R.rax = f->R.rdx;
-			} else {
+			/* write(fd, buffer, size)의 세 인자는
+			 * 첫 번째부터 차례로 rdi, rsi, rdx에 들어온다. */
+			int fd = f->R.rdi;
+			void *buffer = f->R.rsi;
+			int size = f->R.rdx;
+
+			if(fd == 1) {
+				/* fd == 1은 stdout이므로
+				 * 화면(콘솔)에 문자열을 출력한다. */
+				putbuf(buffer, size);
+
+				/* syscall 반환값은 rax로 돌려준다.
+				 * write 성공 시에는 출력한 바이트 수를 반환한다. */
+				f->R.rax = size;
+			}
+			else {
+				/* 지금은 stdout만 지원하므로
+				 * 다른 fd는 실패로 처리한다. */
 				f->R.rax = -1;
 			}
 			break;
 
 		default:
-			thread_exit ();
+			/* 아직 구현하지 않은 syscall 번호가 들어오면
+			 * 우선 현재 프로세스를 종료한다. */
+			thread_exit();
+			break;
 	}
-	// TODO: Your implementation goes here.
-	// printf ("system call!\n");
-	// thread_exit ();
+	printf ("system call!\n");
+	thread_exit ();
 }
