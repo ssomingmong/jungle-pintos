@@ -50,7 +50,7 @@ syscall_handler (struct intr_frame *f) {
 			 * Pintos 자체를 종료하는 시스템콜이다. */
 			power_off();
 			break;
-		
+
 		case SYS_EXIT:
 			/* exit()는 현재 유저 프로그램을 종료한다.
 			 * 지금 첫 단계에서는 간단히 thread_exit()만 호출한다. */

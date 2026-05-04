@@ -22,10 +22,84 @@
 #include "vm/vm.h"
 #endif
 
+#define MAX_ARGS 64
+
 static void process_cleanup (void);
 static bool load (const char *file_name, struct intr_frame *if_);
 static void initd (void *f_name);
 static void __do_fork (void *);
+
+static int parse_args (char *cmdline, char **argv);
+static bool push_args_to_stack (struct intr_frame *if_, char **argv_kern, int argc);
+
+/* 명령어를 공백 기준으로 나누는 함수 */
+int parse_args(char *cmdline, char **argv) {
+	char *token;
+	char *save_ptr;
+	int argc = 0;
+
+	for (token = strtok_r (cmdline, " ", &save_ptr);
+	     token != NULL;
+	     token = strtok_r (NULL, " ", &save_ptr)) 
+		{
+			if (argc >= MAX_ARGS) {
+				return -1;
+			}
+			argv[argc++] = token;
+		}
+
+	return argc;
+}
+
+bool push_args_to_stack (struct intr_frame *if_, char **argv_kern, int argc) {
+	int i;
+	char *argv_user[MAX_ARGS];   // 유저 스택에 복사된 각 인자 문자열의 주소들
+	char **argv_addr;            // 유저 스택에 만들어진 argv 배열의 시작 주소
+
+	for (i = argc - 1; i >= 0; i--) {
+		// 실제 문자열의 길이는 마지막에 \0이 포함된다. 그래서 +1
+		size_t len = strlen (argv_kern[i]) + 1;
+
+		// 스택에 저 문자열 길이만큼 넣기 위해서 포인터를 길이만큼 내린다.
+		if_->rsp -= len;
+		// 커널에 있는 문자열을 방금 만든 공간에 넣는다.
+		memcpy ((void *) if_->rsp, argv_kern[i], len);
+		// 유저 스택에 복사된 문자열의 시작 주소를 저장
+		argv_user[i] = (void *) if_->rsp;
+	}
+
+	// 8바이트 단위로 맞춰주기 위해서 포인터를 내리며 0을 채운다.
+	while (if_->rsp % 8 != 0) {
+		if_->rsp--;
+		*(uint8_t *) if_->rsp = 0;
+	}
+
+	// argv[argc] = NULL sentinel
+	if_->rsp -= sizeof (void *);
+	// "이 주소는 포인터를 저장하는 공간이다"라고 reinterpret
+	*(void **) if_->rsp = NULL;
+	
+	/* i번째 문자열을 현재 스택 위치에 저장한다.*/
+	for (i = argc-1; i >= 0; i--) {
+		if_->rsp -= sizeof (void *);
+		// rsp는 포인터 저장 공간으로, 유저 스택에 복사된 문자열의 시작 주소(argv_user[i])를 저장하겠다.
+		*(void **) if_->rsp = argv_user[i];
+	}
+	
+	// 현재 스택 위치를 저장
+	argv_addr = (void **) if_->rsp;
+	/* 일반적인 함수 호출이라면 스택에 복귀 주소 자리가 있는데, 커널이 유저 프로그램을 실행시켜서
+	 * 복귀 주소 자리가 없어서, 그 자리를 가짜로 채워 넣는데, 그 값이 NULL 이다. */
+	// 포인터 크기만큼 내리고, 그 자리에 NULL -> fake return address
+	if_->rsp -= sizeof (void *);
+	* (void **) if_->rsp = NULL;
+
+	// main(argc, argv)를 미리 레지스터에 저장.
+	if_->R.rdi = argc;
+	if_->R.rsi = (void *) argv_addr;
+
+	return true;
+}
 
 /* General process initializer for initd and other process. */
 static void
@@ -42,6 +116,9 @@ tid_t
 process_create_initd (const char *file_name) {
 	char *fn_copy;
 	tid_t tid;
+	
+	char thread_name[16];
+	char *save_ptr;
 
 	char thread_name[16];
 	char *save_ptr;
@@ -334,7 +411,12 @@ load (const char *file_name, struct intr_frame *if_) {
 	struct file *file = NULL;
 	off_t file_ofs;
 	bool success = false;
-	int i;
+	int i;						// ELF 로딩 반복문
+
+	char *cmdline_copy = NULL;   // 명령줄 복사본
+
+	char *argv_kern[MAX_ARGS];   // 커널 영역에서 임시로 들고 있는 인자 문자열 주소들
+	int argc;                    // 인자 개수
 
 	char *cmdline_copy;          // 명령줄 복사본
 	char *token;                 // strtok_r()로 잘라낸 인자 하나
@@ -361,6 +443,24 @@ load (const char *file_name, struct intr_frame *if_) {
 	if (t->pml4 == NULL)
 		goto done;
 	process_activate (thread_current ());
+
+	/* 일단 command line을 파싱하여 저장한 뒤 filesys_open()에 전달해야 한다. */
+	cmdline_copy = palloc_get_page(0);
+	if (cmdline_copy == NULL)
+		goto done;
+	// str + length/limited + copy 길이 제한이 있는 문자열 복사
+	strlcpy(cmdline_copy, file_name, PGSIZE);
+
+	/* cmdline_copy를 공백을 기준으로 나눈다. 
+	* 이때 증감식의 조건이 strtok_r(NULL, " ", &save_ptr) 인 이유는
+	* 이렇게 주게 되면, 이전에 자르던 문자열을 계속 자르라는 의미가 되기 때문이다.
+	* save_ptr가 어디까지 잘랐는지 기억하는 보조 포인터이기 때문에 다음 호출에서도 이어서 자를 수 있다. 
+	* 자르고 난 뒤 그 값을 argc_kern에 저장한다. */
+	argc = parse_args (cmdline_copy, argv_kern);
+
+	if (argc == 0) {
+		goto done;
+	}
 
 	/* Open executable file. */
 	// 실제로 파일 시스템에서 열어야 하는 실행 파일 이름은 첫 번째 토큰
@@ -438,7 +538,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Set up stack. */
 	if (!setup_stack (if_))
 		goto done;
-
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
@@ -499,11 +598,17 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* 완성된 유저 스택 포인터를 intr_frame의 rsp에 저장한다. */
 	if_->rsp = (uint64_t) rsp;	
 
+	// 여기까지 왔다면 성공했다는 거니까 true 처리.
 	success = true;
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+	if (cmdline_copy != NULL) {
+		palloc_free_page (cmdline_copy);
+	}
+	if (file != NULL) {
+		file_close (file);
+	}
 	return success;
 }
 
@@ -632,7 +737,6 @@ setup_stack (struct intr_frame *if_) {
 	}
 	return success;
 }
-
 /* Adds a mapping from user virtual address UPAGE to kernel
  * virtual address KPAGE to the page table.
  * If WRITABLE is true, the user process may modify the page;
