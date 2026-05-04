@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#define MAX_ARGS 64
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -130,8 +131,7 @@ process_create_initd (const char *file_name) {
 	strlcpy (fn_copy, file_name, PGSIZE);
 
 	strlcpy (thread_name, file_name, sizeof thread_name);
-	strtok_r (thread_name, " ", &save_ptr);
-
+	strtok_r(thread_name, " ", &save_ptr);
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (thread_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
@@ -288,6 +288,7 @@ process_wait (tid_t child_tid UNUSED) {
 	 * XXX:       implementing the process_wait. */
 	timer_sleep(100);
 	return 0;
+
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -413,11 +414,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	bool success = false;
 	int i;						// ELF 로딩 반복문
 
-	char *cmdline_copy = NULL;   // 명령줄 복사본
-
-	char *argv_kern[MAX_ARGS];   // 커널 영역에서 임시로 들고 있는 인자 문자열 주소들
-	int argc;                    // 인자 개수
-
 	char *cmdline_copy;          // 명령줄 복사본
 	char *token;                 // strtok_r()로 잘라낸 인자 하나
 	char *save_ptr;              // strtok_r() 보조 포인터
@@ -438,6 +434,23 @@ load (const char *file_name, struct intr_frame *if_) {
 		argv_kern[argc++] = token;
 	}
 
+	/* file_name 전체 문자열을 복사본에 그대로 복사한다. */
+	strlcpy(cmdline_copy, file_name, PGSIZE);                // 반복문 인덱스
+token = strtok_r(cmdline_copy, " ", &save_ptr);
+	while(token != NULL) {
+		/* 현재 토큰을 argv_kern[]에 저장한다. */
+		argv_kern[argc] = token;
+
+		/* 인자를 하나 찾았으므로 argc를 1 증가시킨다. */
+		argc++;
+
+		/* 인자가 너무 많아지면 더 이상 진행하지 않는다. */
+		if(argc >= MAX_ARGS)
+			goto done;
+
+		/* 같은 문자열에서 다음 토큰을 계속 꺼낸다. */
+		token = strtok_r(NULL, " ", &save_ptr);
+	}
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
