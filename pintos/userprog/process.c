@@ -43,6 +43,8 @@ process_create_initd (const char *file_name) {
 	char *fn_copy;
 	tid_t tid;
 
+	char thread_name[16];
+	char *save_ptr;
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
 	fn_copy = palloc_get_page (0);
@@ -50,8 +52,11 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	strlcpy (thread_name, file_name, sizeof thread_name);
+	strtok_r (thread_name, " ", &save_ptr);
+
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (thread_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -204,7 +209,8 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	return -1;
+	timer_sleep(100);
+	return 0;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -322,12 +328,33 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
  * Returns true if successful, false otherwise. */
 static bool
 load (const char *file_name, struct intr_frame *if_) {
+	enum { MAX_ARGS = 64 };
 	struct thread *t = thread_current ();
 	struct ELF ehdr;
 	struct file *file = NULL;
 	off_t file_ofs;
 	bool success = false;
 	int i;
+
+	char *cmdline_copy;          // 명령줄 복사본
+	char *token;                 // strtok_r()로 잘라낸 인자 하나
+	char *save_ptr;              // strtok_r() 보조 포인터
+
+	char *argv_kern[MAX_ARGS];   // 커널 영역에서 임시로 들고 있는 인자 문자열 주소들
+	char *argv_user[MAX_ARGS];   // 유저 스택에 복사된 각 인자 문자열의 주소들
+	char **argv_addr;            // 유저 스택에 만들어진 argv 배열의 시작 주소
+	uint8_t *rsp;
+
+	int argc = 0;                // 인자 개수
+
+	cmdline_copy = (char *) file_name;
+
+	// 명령줄 문자열을 공백 기준으로 나누어 argv_kern[]에 순서대로 저장
+	for (token = strtok_r (cmdline_copy, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
+	{
+		// 잘라낸 인자 문자열의 주소를 argv_kern에 저장하고 argc를 1 증가
+		argv_kern[argc++] = token;
+	}
 
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
@@ -336,9 +363,10 @@ load (const char *file_name, struct intr_frame *if_) {
 	process_activate (thread_current ());
 
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	// 실제로 파일 시스템에서 열어야 하는 실행 파일 이름은 첫 번째 토큰
+	file = filesys_open (argv_kern[0]);
 	if (file == NULL) {
-		printf ("load: %s: open failed\n", file_name);
+		printf ("load: %s: open failed\n", argv_kern[0]);
 		goto done;
 	}
 
@@ -350,7 +378,7 @@ load (const char *file_name, struct intr_frame *if_) {
 			|| ehdr.e_version != 1
 			|| ehdr.e_phentsize != sizeof (struct Phdr)
 			|| ehdr.e_phnum > 1024) {
-		printf ("load: %s: error loading executable\n", file_name);
+		printf ("load: %s: error loading executable\n", argv_kern[0]);
 		goto done;
 	}
 
@@ -416,6 +444,60 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	// setup_stack()이 만든 초기 유저 스택 꼭대기부터 인자를 배치
+	rsp = (uint8_t *) if_->rsp;
+
+	// 문자열 본문을 유저 스택에 역순으로 복사
+	for (i = argc - 1; i >= 0; i--)
+	{
+		// 문자열 끝의 '\0'까지 포함
+		size_t len = strlen (argv_kern[i]) + 1;
+
+		// 문자열 길이만큼 스택 포인터를 내린다
+		rsp -= len;
+
+		// 현재 위치에 문자열 본문을 복사
+		memcpy(rsp, argv_kern[i], len);
+
+		// 복사된 문자열의 유저 스택 주소를 저장
+		argv_user[i] = (char *) rsp;
+	}
+
+	// 스택 주소를 8바이트 경계에 맞추기
+	rsp = (uint8_t *) ((uint64_t) rsp & ~0x7);
+
+	// argv[argc]에 들어갈 NULL 포인터 공간 만들기
+	rsp -= sizeof (char *);
+
+	// argv 마지막 원소에 NULL 넣기
+	*(char **) rsp = NULL;
+
+	// 각 argv[i]가 인자 문자열을 가리키도록 포인터들을 스택에 넣기
+	for (i = argc - 1; i >= 0; i--) 
+	{
+		// 포인터 하나를 저장할 공간만큼 스택 포인터 내리기
+		rsp -= sizeof (char *);
+		// argv_user[i]에 저장해 둔 문자열 주소를 스택에 장
+		*(char **) rsp = argv_user[i];
+	}
+
+	/* 현재 rsp가 argv[0]이 위치한 곳이므로, 이것이 최종 argv 시작 주소가 된다. */
+	argv_addr = (char **) rsp;
+
+	/* 유저 프로그램이 함수 호출로 시작한 것처럼 보이게 fake return address 공간을 만든다. */
+	rsp -= sizeof (void *);
+
+	/* 실제로 돌아갈 주소는 없으므로 NULL을 넣는다. */
+	*(void **) rsp = NULL;
+
+	/* x86-64 호출 규약상 첫 번째 인자 argc는 rdi 레지스터에 넣는다. */
+	if_->R.rdi = argc;
+
+	/* x86-64 호출 규약상 두 번째 인자 argv는 rsi 레지스터에 넣는다. */
+	if_->R.rsi = (uint64_t) argv_addr;
+
+	/* 완성된 유저 스택 포인터를 intr_frame의 rsp에 저장한다. */
+	if_->rsp = (uint64_t) rsp;	
 
 	success = true;
 

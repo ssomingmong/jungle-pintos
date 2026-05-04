@@ -92,6 +92,8 @@ struct thread {
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       // 현재 적용 중인 우선순위
 	int base_priority;					// 원래 우선순위
+	
+	int exit_status;					// 유저 프로세스가 exit(status)로 넘긴 종료 코드 저장
 
 	// 스레드를 깨워야 하는 tick 시점
 	int64_t wakeup_tick;
