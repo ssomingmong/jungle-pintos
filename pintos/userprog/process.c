@@ -74,26 +74,29 @@ bool push_args_to_stack (struct intr_frame *if_, char **argv_kern, int argc) {
 		*(uint8_t *) if_->rsp = 0;
 	}
 
-	/* 일반적인 함수 호출이라면 스택에 복귀 주소 자리가 있는데, 커널이 유저 프로그램을 실행시켜서
-	 * 복귀 주소 자리가 없어서, 그 자리를 가짜로 채워 넣는데, 그 값이 NULL 이다. */
+	// argv[argc] = NULL sentinel
 	if_->rsp -= sizeof (void *);
+	// "이 주소는 포인터를 저장하는 공간이다"라고 reinterpret
 	*(void **) if_->rsp = NULL;
-
+	
 	/* i번째 문자열을 현재 스택 위치에 저장한다.*/
 	for (i = argc-1; i >= 0; i--) {
 		if_->rsp -= sizeof (void *);
+		// rsp는 포인터 저장 공간으로, 유저 스택에 복사된 문자열의 시작 주소(argv_user[i])를 저장하겠다.
 		*(void **) if_->rsp = argv_user[i];
 	}
-
+	
 	// 현재 스택 위치를 저장
 	argv_addr = (void **) if_->rsp;
+	/* 일반적인 함수 호출이라면 스택에 복귀 주소 자리가 있는데, 커널이 유저 프로그램을 실행시켜서
+	 * 복귀 주소 자리가 없어서, 그 자리를 가짜로 채워 넣는데, 그 값이 NULL 이다. */
 	// 포인터 크기만큼 내리고, 그 자리에 NULL -> fake return address
 	if_->rsp -= sizeof (void *);
 	* (void **) if_->rsp = NULL;
 
 	// main(argc, argv)를 미리 레지스터에 저장.
 	if_->R.rdi = argc;
-	if_->R.rsi = (uint64_t) argv_addr;
+	if_->R.rsi = (void *) argv_addr;
 
 	return true;
 }
