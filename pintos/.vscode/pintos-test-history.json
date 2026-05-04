@@ -1,13 +1,13 @@
 {
   "userprog": {
     "tests/userprog/args-none": {
-      "count": 12,
-      "last_used": 1777884062.956,
+      "count": 13,
+      "last_used": 1777895515.705,
       "last_action": "run"
     },
     "tests/userprog/args-single": {
-      "count": 5,
-      "last_used": 1777884105.864,
+      "count": 6,
+      "last_used": 1777895566.57,
       "last_action": "run"
     },
     "tests/userprog/args-multiple": {
