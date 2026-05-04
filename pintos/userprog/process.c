@@ -44,6 +44,8 @@ process_create_initd (const char *file_name) {
 	char *fn_copy;
 	tid_t tid;
 
+	char thread_name[16];
+	char *save_ptr;
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
 	fn_copy = palloc_get_page (0);
@@ -51,8 +53,10 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	strlcpy (thread_name, file_name, sizeof thread_name);
+	strtok_r(thread_name, " ", &save_ptr);
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (thread_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -205,7 +209,9 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	return -1;
+	timer_sleep(100);
+	return 0;
+
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -331,15 +337,39 @@ load (const char *file_name, struct intr_frame *if_) {
 	int i;
 	char *cmdline_copy;          // 명령줄 복사본
 	char *token;                 // strtok_r()로 잘라낸 인자 하나
-	char *save_ptr;              // strtok_r() 보조 포인터
+	char *save_ptr = NULL;              // strtok_r() 보조 포인터
 
 	char *argv_kern[MAX_ARGS];   // 커널에서 임시로 들고 있는 인자 문자열들
 	char *argv_user[MAX_ARGS];   // 유저 스택에 복사된 문자열 주소들
 	char **argv_addr;            // 유저 스택 안 argv 배열의 시작 주소
 
-	int argc;                    // 인자 개수
-	//int i;                       // 반복문 인덱스
+	int argc = 0;                    // 인자 개수
+	//int i;       
 
+	/* 원본 file_name을 strtok_r()로 바로 자르지 않기 위해
+	 * 명령줄 복사본을 하나 만든다. */
+	cmdline_copy = palloc_get_page(0);
+
+	if(cmdline_copy == NULL) 
+		goto done;
+
+	/* file_name 전체 문자열을 복사본에 그대로 복사한다. */
+	strlcpy(cmdline_copy, file_name, PGSIZE);                // 반복문 인덱스
+token = strtok_r(cmdline_copy, " ", &save_ptr);
+	while(token != NULL) {
+		/* 현재 토큰을 argv_kern[]에 저장한다. */
+		argv_kern[argc] = token;
+
+		/* 인자를 하나 찾았으므로 argc를 1 증가시킨다. */
+		argc++;
+
+		/* 인자가 너무 많아지면 더 이상 진행하지 않는다. */
+		if(argc >= MAX_ARGS)
+			goto done;
+
+		/* 같은 문자열에서 다음 토큰을 계속 꺼낸다. */
+		token = strtok_r(NULL, " ", &save_ptr);
+	}
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
@@ -347,9 +377,9 @@ load (const char *file_name, struct intr_frame *if_) {
 	process_activate (thread_current ());
 
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	file = filesys_open (argv_kern[0]);
 	if (file == NULL) {
-		printf ("load: %s: open failed\n", file_name);
+		printf ("load: %s: open failed\n", argv_kern[0]);
 		goto done;
 	}
 
@@ -425,38 +455,11 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
-	/* argument passing 구현 */
-	/* 처음에는 인자가 하나도 없는 상태로 시작한다. */
-	argc = 0;
-	save_ptr = NULL;
-
-	/* 원본 file_name을 strtok_r()로 바로 자르지 않기 위해
-	 * 명령줄 복사본을 하나 만든다. */
-	cmdline_copy = palloc_get_page(0);
-
-	if(cmdline_copy == NULL) 
-		goto done;
-
-	/* file_name 전체 문자열을 복사본에 그대로 복사한다. */
-	strlcpy(cmdline_copy, file_name, PGSIZE);
+	
 
 	/* 명령줄을 공백 기준으로 잘라서
 	 * argv_kern[]에 저장하고 argc를 센다. */
-	token = strtok_r(cmdline_copy, " ", &save_ptr);
-	while(token != NULL) {
-		/* 현재 토큰을 argv_kern[]에 저장한다. */
-		argv_kern[argc] = token;
-
-		/* 인자를 하나 찾았으므로 argc를 1 증가시킨다. */
-		argc++;
-
-		/* 인자가 너무 많아지면 더 이상 진행하지 않는다. */
-		if(argc >= MAX_ARGS)
-			goto done;
-
-		/* 같은 문자열에서 다음 토큰을 계속 꺼낸다. */
-		token = strtok_r(NULL, " ", &save_ptr);
-	}
+	
 
 	/* 잘라낸 문자열들을 뒤에서부터 유저 스택에 복사하고
 	 * 복사된 주소를 argv_user[]에 저장한다. */
