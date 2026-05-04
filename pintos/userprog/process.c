@@ -42,6 +42,8 @@ tid_t
 process_create_initd (const char *file_name) {
 	char *fn_copy;
 	tid_t tid;
+	char *save_ptr;
+	char thread_name[16];
 
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
@@ -50,8 +52,11 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	strlcpy (thread_name, file_name, sizeof thread_name);
+	strtok_r (thread_name, " ", &save_ptr);
+
 	/* Create a new thread to execute FILE_NAME. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (thread_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -204,7 +209,8 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	return -1;
+	timer_sleep(100);
+	 return 0;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -447,7 +453,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	for (k = argc-1; 0 <= k; k--) { // argv_kern 전체순회
 		if_->rsp -= strlen(argv_kern[k]) + 1; // rsp = 단어의 길이(0을 포함하여 +1) 만큼 뺀다
 	 	strlcpy((char *)if_->rsp, argv_kern[k], strlen(argv_kern[k]) + 1); // rsp에 문자열 삽입
-		argv_user[k] = if_->rsp; // argv_user 에 방금 설정한 rsp를 저장
+		argv_user[k] = (char *)if_->rsp; // argv_user 에 방금 설정한 rsp를 저장
 		} 
 
 	// Phase 2: Padding
@@ -456,17 +462,18 @@ load (const char *file_name, struct intr_frame *if_) {
 		}
 
 	// Phase 3: Phase 1 에서 삽입한 문자열의 주소 삽입
-	if_->rsp -= 8; // stack 공간 확보
+	if_->rsp -= sizeof(char *); // stack 공간 확보
 	*(char **)if_->rsp = NULL; // NULL 삽입
 	for (k = argc-1; 0 <= k; k-- ) { // 주소 삽입은 역순
-		if_->rsp -= 8; // 주소공간 확보
+		if_->rsp -= sizeof(char *); // 주소공간 확보
 		*(char **)if_->rsp = argv_user[k]; // 주소 삽입
 	}
-	if_->R.rdi = argc; // cpu 의 시작지점
-	if_->R.rsi = if_->rsp;
+	argv_addr = (void **)if_->rsp; // .. 
+	if_->R.rdi = argc; // 첫번째 인자
+	if_->R.rsi = argv_addr; // 두번째 인자
 
-	if_->rsp -= 8;
-	*(uint64_t **)if_->rsp = 0; // fake return address 삽입
+	if_->rsp -= sizeof(void *);
+	*(uint64_t *)if_->rsp = 0; // fake return address 삽입
 
 	success = true;
 	
