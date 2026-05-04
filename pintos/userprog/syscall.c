@@ -53,6 +53,7 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_EXIT:
 			/* exit()는 현재 유저 프로그램을 종료한다.
 			 * 지금 첫 단계에서는 간단히 thread_exit()만 호출한다. */
+			printf ("%s: exit(%d)\n", thread_current ()->name, f->R.rdi);
 			thread_exit();
 			break;
 
@@ -85,6 +86,6 @@ syscall_handler (struct intr_frame *f) {
 			thread_exit();
 			break;
 	}
-	printf ("system call!\n");
-	thread_exit ();
+	// printf ("system call!\n");
+	// thread_exit ();
 }
