@@ -276,6 +276,8 @@ process_activate (struct thread *next) {
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
+#define MAX_ARGS 64
+
 /* Executable header.  See [ELF1] 1-4 to 1-8.
  * This appears at the very beginning of an ELF binary. */
 struct ELF64_hdr {
@@ -328,6 +330,30 @@ load (const char *file_name, struct intr_frame *if_) {
 	off_t file_ofs;
 	bool success = false;
 	int i;
+	int k;
+	char *cmdline_copy; // 명령줄 복사본
+	char *token;	// strtok_r()로 잘라낸 인자 하나
+	char *save_ptr;	// strtok_r() 보조 포인터
+
+	char *argv_kern[MAX_ARGS];	// 커널 영역에서 임시로 들고 있는 인자 문자열 주소들
+	char *argv_user[MAX_ARGS];	// 유저 스택에 복사된 각 인자 문자열의 주소들
+	char **argv_addr;	// 유저 스택에 만들어진 argv 배열의 시작 주소
+
+	int argc;	// 인자 개수
+
+	/* 파일 이름 쪼개기 */
+	cmdline_copy = palloc_get_page(PAL_ZERO);
+	strlcpy(cmdline_copy, file_name, PGSIZE);
+	token = strtok_r(cmdline_copy, " ", &save_ptr); // 첫 파싱
+	argc = 0;
+
+	while (token != NULL) {	// 남은 문자열이 없을때까지
+		argv_kern[argc] = token; // 커널영역에 저장
+		token = strtok_r(NULL, " ", &save_ptr);	// 이어서 자름
+		argc++;
+	}
+
+	file_name = argv_kern[0];
 
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
@@ -416,8 +442,35 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	// Phase 1: stack 에 문자열 삽입
+	argv_user[argc] = NULL; // 마지막은 NULL
+	for (k = argc-1; 0 <= k; k--) { // argv_kern 전체순회
+		if_->rsp -= strlen(argv_kern[k]) + 1; // rsp = 단어의 길이(0을 포함하여 +1) 만큼 뺀다
+	 	strlcpy((char *)if_->rsp, argv_kern[k], strlen(argv_kern[k]) + 1); // rsp에 문자열 삽입
+		argv_user[k] = if_->rsp; // argv_user 에 방금 설정한 rsp를 저장
+		} 
+
+	// Phase 2: Padding
+	if (!(if_->rsp % 8 == 0)) { // 스택주소가 8의 배수가 아니면 
+			if_->rsp -= if_->rsp % 8; // 8의 배수로 맞추기 위한 추가 할당
+		}
+
+	// Phase 3: Phase 1 에서 삽입한 문자열의 주소 삽입
+	if_->rsp -= 8; // stack 공간 확보
+	*(char **)if_->rsp = NULL; // NULL 삽입
+	for (k = argc-1; 0 <= k; k-- ) { // 주소 삽입은 역순
+		if_->rsp -= 8; // 주소공간 확보
+		*(char **)if_->rsp = argv_user[k]; // 주소 삽입
+	}
+	if_->R.rdi = argc; // cpu 의 시작지점
+	if_->R.rsi = if_->rsp;
+
+	if_->rsp -= 8;
+	*(uint64_t **)if_->rsp = 0; // fake return address 삽입
 
 	success = true;
+	
+	palloc_free_page(cmdline_copy); // cmdline_copy 해제
 
 done:
 	/* We arrive here whether the load is successful or not. */
