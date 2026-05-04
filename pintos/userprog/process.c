@@ -18,7 +18,6 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
-#define MAX_ARGS 64
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -34,7 +33,8 @@ static int parse_args (char *cmdline, char **argv);
 static bool push_args_to_stack (struct intr_frame *if_, char **argv_kern, int argc);
 
 /* 명령어를 공백 기준으로 나누는 함수 */
-int parse_args(char *cmdline, char **argv) {
+static int
+parse_args(char *cmdline, char **argv) {
 	char *token;
 	char *save_ptr;
 	int argc = 0;
@@ -52,7 +52,8 @@ int parse_args(char *cmdline, char **argv) {
 	return argc;
 }
 
-bool push_args_to_stack (struct intr_frame *if_, char **argv_kern, int argc) {
+static bool
+push_args_to_stack (struct intr_frame *if_, char **argv_kern, int argc) {
 	int i;
 	char *argv_user[MAX_ARGS];   // 유저 스택에 복사된 각 인자 문자열의 주소들
 	char **argv_addr;            // 유저 스택에 만들어진 argv 배열의 시작 주소
@@ -88,7 +89,7 @@ bool push_args_to_stack (struct intr_frame *if_, char **argv_kern, int argc) {
 	}
 	
 	// 현재 스택 위치를 저장
-	argv_addr = (void **) if_->rsp;
+	argv_addr = (char **) if_->rsp;
 	/* 일반적인 함수 호출이라면 스택에 복귀 주소 자리가 있는데, 커널이 유저 프로그램을 실행시켜서
 	 * 복귀 주소 자리가 없어서, 그 자리를 가짜로 채워 넣는데, 그 값이 NULL 이다. */
 	// 포인터 크기만큼 내리고, 그 자리에 NULL -> fake return address
@@ -97,7 +98,7 @@ bool push_args_to_stack (struct intr_frame *if_, char **argv_kern, int argc) {
 
 	// main(argc, argv)를 미리 레지스터에 저장.
 	if_->R.rdi = argc;
-	if_->R.rsi = (void *) argv_addr;
+	if_->R.rsi = (uint64_t) argv_addr;
 
 	return true;
 }
@@ -120,8 +121,6 @@ process_create_initd (const char *file_name) {
 	char *save_ptr;
 	char thread_name[16];
 
-	char thread_name[16];
-	char *save_ptr;
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
 	fn_copy = palloc_get_page (0);
@@ -360,8 +359,6 @@ process_activate (struct thread *next) {
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-#define MAX_ARGS 64
-
 /* Executable header.  See [ELF1] 1-4 to 1-8.
  * This appears at the very beginning of an ELF binary. */
 struct ELF64_hdr {
@@ -408,7 +405,6 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
  * Returns true if successful, false otherwise. */
 static bool
 load (const char *file_name, struct intr_frame *if_) {
-	enum { MAX_ARGS = 64 };
 	struct thread *t = thread_current ();
 	struct ELF ehdr;
 	struct file *file = NULL;
@@ -416,43 +412,10 @@ load (const char *file_name, struct intr_frame *if_) {
 	bool success = false;
 	int i;						// ELF 로딩 반복문
 
-	char *cmdline_copy;          // 명령줄 복사본
-	char *token;                 // strtok_r()로 잘라낸 인자 하나
-	char *save_ptr;              // strtok_r() 보조 포인터
-
+	char *cmdline_copy = NULL;   // 명령줄 복사본
 	char *argv_kern[MAX_ARGS];   // 커널 영역에서 임시로 들고 있는 인자 문자열 주소들
-	char *argv_user[MAX_ARGS];   // 유저 스택에 복사된 각 인자 문자열의 주소들
-	char **argv_addr;            // 유저 스택에 만들어진 argv 배열의 시작 주소
-	uint8_t *rsp;
+	int argc;                    // 인자 개수
 
-	int argc = 0;                // 인자 개수
-
-	cmdline_copy = (char *) file_name;
-
-	// 명령줄 문자열을 공백 기준으로 나누어 argv_kern[]에 순서대로 저장
-	for (token = strtok_r (cmdline_copy, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
-	{
-		// 잘라낸 인자 문자열의 주소를 argv_kern에 저장하고 argc를 1 증가
-		argv_kern[argc++] = token;
-	}
-
-	/* file_name 전체 문자열을 복사본에 그대로 복사한다. */
-	strlcpy(cmdline_copy, file_name, PGSIZE);                // 반복문 인덱스
-token = strtok_r(cmdline_copy, " ", &save_ptr);
-	while(token != NULL) {
-		/* 현재 토큰을 argv_kern[]에 저장한다. */
-		argv_kern[argc] = token;
-
-		/* 인자를 하나 찾았으므로 argc를 1 증가시킨다. */
-		argc++;
-
-		/* 인자가 너무 많아지면 더 이상 진행하지 않는다. */
-		if(argc >= MAX_ARGS)
-			goto done;
-
-		/* 같은 문자열에서 다음 토큰을 계속 꺼낸다. */
-		token = strtok_r(NULL, " ", &save_ptr);
-	}
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
 	if (t->pml4 == NULL)
@@ -466,14 +429,10 @@ token = strtok_r(cmdline_copy, " ", &save_ptr);
 	// str + length/limited + copy 길이 제한이 있는 문자열 복사
 	strlcpy(cmdline_copy, file_name, PGSIZE);
 
-	/* cmdline_copy를 공백을 기준으로 나눈다. 
-	* 이때 증감식의 조건이 strtok_r(NULL, " ", &save_ptr) 인 이유는
-	* 이렇게 주게 되면, 이전에 자르던 문자열을 계속 자르라는 의미가 되기 때문이다.
-	* save_ptr가 어디까지 잘랐는지 기억하는 보조 포인터이기 때문에 다음 호출에서도 이어서 자를 수 있다. 
-	* 자르고 난 뒤 그 값을 argc_kern에 저장한다. */
+	/* cmdline_copy를 공백 기준으로 나누어 argv_kern[]에 저장한다. */
 	argc = parse_args (cmdline_copy, argv_kern);
 
-	if (argc == 0) {
+	if (argc <= 0) {
 		goto done;
 	}
 
@@ -558,65 +517,12 @@ token = strtok_r(cmdline_copy, " ", &save_ptr);
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
-	// setup_stack()이 만든 초기 유저 스택 꼭대기부터 인자를 배치
-	rsp = (uint8_t *) if_->rsp;
-
-	// 문자열 본문을 유저 스택에 역순으로 복사
-	for (i = argc - 1; i >= 0; i--)
-	{
-		// 문자열 끝의 '\0'까지 포함
-		size_t len = strlen (argv_kern[i]) + 1;
-
-		// 문자열 길이만큼 스택 포인터를 내린다
-		rsp -= len;
-
-		// 현재 위치에 문자열 본문을 복사
-		memcpy(rsp, argv_kern[i], len);
-
-		// 복사된 문자열의 유저 스택 주소를 저장
-		argv_user[i] = (char *) rsp;
+	if (!push_args_to_stack(if_, argv_kern, argc)) {
+		goto done;
 	}
-
-	// 스택 주소를 8바이트 경계에 맞추기
-	rsp = (uint8_t *) ((uint64_t) rsp & ~0x7);
-
-	// argv[argc]에 들어갈 NULL 포인터 공간 만들기
-	rsp -= sizeof (char *);
-
-	// argv 마지막 원소에 NULL 넣기
-	*(char **) rsp = NULL;
-
-	// 각 argv[i]가 인자 문자열을 가리키도록 포인터들을 스택에 넣기
-	for (i = argc - 1; i >= 0; i--) 
-	{
-		// 포인터 하나를 저장할 공간만큼 스택 포인터 내리기
-		rsp -= sizeof (char *);
-		// argv_user[i]에 저장해 둔 문자열 주소를 스택에 장
-		*(char **) rsp = argv_user[i];
-	}
-
-	/* 현재 rsp가 argv[0]이 위치한 곳이므로, 이것이 최종 argv 시작 주소가 된다. */
-	argv_addr = (char **) rsp;
-
-	/* 유저 프로그램이 함수 호출로 시작한 것처럼 보이게 fake return address 공간을 만든다. */
-	rsp -= sizeof (void *);
-
-	/* 실제로 돌아갈 주소는 없으므로 NULL을 넣는다. */
-	*(void **) rsp = NULL;
-
-	/* x86-64 호출 규약상 첫 번째 인자 argc는 rdi 레지스터에 넣는다. */
-	if_->R.rdi = argc;
-
-	/* x86-64 호출 규약상 두 번째 인자 argv는 rsi 레지스터에 넣는다. */
-	if_->R.rsi = (uint64_t) argv_addr;
-
-	/* 완성된 유저 스택 포인터를 intr_frame의 rsp에 저장한다. */
-	if_->rsp = (uint64_t) rsp;	
 
 	// 여기까지 왔다면 성공했다는 거니까 true 처리.
 	success = true;
-	
-	palloc_free_page(cmdline_copy); // cmdline_copy 해제
 
 done:
 	/* We arrive here whether the load is successful or not. */
