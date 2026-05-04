@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#define MAX_ARGS 64
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -328,6 +329,16 @@ load (const char *file_name, struct intr_frame *if_) {
 	off_t file_ofs;
 	bool success = false;
 	int i;
+	char *cmdline_copy;          // 명령줄 복사본
+	char *token;                 // strtok_r()로 잘라낸 인자 하나
+	char *save_ptr;              // strtok_r() 보조 포인터
+
+	char *argv_kern[MAX_ARGS];   // 커널에서 임시로 들고 있는 인자 문자열들
+	char *argv_user[MAX_ARGS];   // 유저 스택에 복사된 문자열 주소들
+	char **argv_addr;            // 유저 스택 안 argv 배열의 시작 주소
+
+	int argc;                    // 인자 개수
+	//int i;                       // 반복문 인덱스
 
 	/* Allocate and activate page directory. */
 	t->pml4 = pml4_create ();
@@ -414,8 +425,107 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
-	/* TODO: Your code goes here.
-	 * TODO: Implement argument passing (see project2/argument_passing.html). */
+	/* argument passing 구현 */
+	/* 처음에는 인자가 하나도 없는 상태로 시작한다. */
+	argc = 0;
+	save_ptr = NULL;
+
+	/* 원본 file_name을 strtok_r()로 바로 자르지 않기 위해
+	 * 명령줄 복사본을 하나 만든다. */
+	cmdline_copy = palloc_get_page(0);
+
+	if(cmdline_copy == NULL) 
+		goto done;
+
+	/* file_name 전체 문자열을 복사본에 그대로 복사한다. */
+	strlcpy(cmdline_copy, file_name, PGSIZE);
+
+	/* 명령줄을 공백 기준으로 잘라서
+	 * argv_kern[]에 저장하고 argc를 센다. */
+	token = strtok_r(cmdline_copy, " ", &save_ptr);
+	while(token != NULL) {
+		/* 현재 토큰을 argv_kern[]에 저장한다. */
+		argv_kern[argc] = token;
+
+		/* 인자를 하나 찾았으므로 argc를 1 증가시킨다. */
+		argc++;
+
+		/* 인자가 너무 많아지면 더 이상 진행하지 않는다. */
+		if(argc >= MAX_ARGS)
+			goto done;
+
+		/* 같은 문자열에서 다음 토큰을 계속 꺼낸다. */
+		token = strtok_r(NULL, " ", &save_ptr);
+	}
+
+	/* 잘라낸 문자열들을 뒤에서부터 유저 스택에 복사하고
+	 * 복사된 주소를 argv_user[]에 저장한다. */
+	for(i = argc - 1; i >= 0; i--) {
+		/* 문자열 끝의 '\0'까지 같이 복사해야 하므로 +1 한다. */
+		int length = strlen(argv_kern[i]) + 1;
+
+		/* 문자열이 들어갈 만큼 스택 포인터를 아래로 내린다. */
+		if_->rsp -= length;
+
+		/* argv_kern[]에 있는 문자열을 유저 스택으로 복사한다. */
+		memcpy(if_->rsp, argv_kern[i], length);
+
+		/* 나중에 argv 배열을 만들 수 있도록
+		 * 복사된 문자열의 유저 주소를 저장한다. */
+		argv_user[i] = if_->rsp;
+	}
+
+	/* 문자열 복사가 끝난 뒤 argv 배열을 올리기 전에
+	 * rsp가 8바이트 정렬이 되도록 padding을 넣는다. */
+	while((uint64_t)if_->rsp % 8 !=0) {
+		/* 스택 포인터를 1바이트 아래로 내리고 */
+		if_->rsp -= 1;
+
+		/* 그 자리를 0으로 채워 정렬용 빈칸을 만든다. */
+		*(uint8_t *)if_->rsp = 0;
+	}
+	/* TODO 5:
+	 * argv[argc] = NULL 이 되도록
+	 * NULL 포인터 하나를 스택에 push 한다.
+	 *
+	 * 힌트:
+	 * - if_->rsp -= sizeof(char *)
+	 * - 그 위치에 0 저장
+	 */
+	if_->rsp -= sizeof(char *);
+
+	/* rsp 위치를 char * 한 칸으로 보고 그 자리에 접근 */
+	*(char **) if_->rsp = NULL;
+	/* TODO 6:
+	 * argv_user[]에 저장해 둔 문자열 주소들을
+	 * 다시 스택에 "뒤에서부터" push 한다.
+	 */
+	for(i = argc - 1; i >= 0; i--) {
+		if_->rsp -= sizeof(char *);
+		*(char **) if_->rsp = argv_user[i];
+	}
+	/* TODO 7:
+	 * 지금 시점의 if_->rsp가
+	 * 유저 스택 안 argv 배열의 시작 주소다.
+	 * 이를 argv_addr에 저장한다.
+	 */
+	argv_addr = (char **) if_->rsp;
+
+	/* TODO 8:
+	 * 유저 프로그램 시작 시 argc, argv를 받을 수 있도록
+	 * 레지스터를 세팅한다.
+	 *
+	 * 규칙:
+	 * - 첫 번째 인자 = rdi = argc
+	 * - 두 번째 인자 = rsi = argv_addr
+	 */
+	if_->R.rdi = argc;
+	if_->R.rsi = argv_addr;
+	/* TODO 9:
+	 * cmdline_copy로 사용한 임시 페이지를 해제한다.
+	 * - palloc_free_page(cmdline_copy);
+	 */
+	palloc_free_page(cmdline_copy);
 
 	success = true;
 
