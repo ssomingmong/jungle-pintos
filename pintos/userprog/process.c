@@ -30,7 +30,9 @@ static void initd (void *f_name);
 static void __do_fork (void *);
 
 static int parse_args (char *cmdline, char **argv);
+static bool push_args_to_stack (struct intr_frame *if_, char **argv_kern, int argc);
 
+/* 명령어를 공백 기준으로 나누는 함수 */
 int parse_args(char *cmdline, char **argv) {
 	char *token;
 	char *save_ptr;
@@ -47,6 +49,53 @@ int parse_args(char *cmdline, char **argv) {
 		}
 
 	return argc;
+}
+
+bool push_args_to_stack (struct intr_frame *if_, char **argv_kern, int argc) {
+	int i;
+	char *argv_user[MAX_ARGS];   // 유저 스택에 복사된 각 인자 문자열의 주소들
+	char **argv_addr;            // 유저 스택에 만들어진 argv 배열의 시작 주소
+
+	for (i = argc - 1; i >= 0; i--) {
+		// 실제 문자열의 길이는 마지막에 \0이 포함된다. 그래서 +1
+		size_t len = strlen (argv_kern[i]) + 1;
+
+		// 스택에 저 문자열 길이만큼 넣기 위해서 포인터를 길이만큼 내린다.
+		if_->rsp -= len;
+		// 커널에 있는 문자열을 방금 만든 공간에 넣는다.
+		memcpy ((void *) if_->rsp, argv_kern[i], len);
+		// 유저 스택에 복사된 문자열의 시작 주소를 저장
+		argv_user[i] = (void *) if_->rsp;
+	}
+
+	// 8바이트 단위로 맞춰주기 위해서 포인터를 내리며 0을 채운다.
+	while (if_->rsp % 8 != 0) {
+		if_->rsp--;
+		*(uint8_t *) if_->rsp = 0;
+	}
+
+	/* 일반적인 함수 호출이라면 스택에 복귀 주소 자리가 있는데, 커널이 유저 프로그램을 실행시켜서
+	 * 복귀 주소 자리가 없어서, 그 자리를 가짜로 채워 넣는데, 그 값이 NULL 이다. */
+	if_->rsp -= sizeof (void *);
+	*(void **) if_->rsp = NULL;
+
+	/* i번째 문자열을 현재 스택 위치에 저장한다.*/
+	for (i = argc-1; i >= 0; i--) {
+		if_->rsp -= sizeof (void *);
+		*(void **) if_->rsp = argv_user[i];
+	}
+
+	// 현재 스택 위치를 저장
+	argv_addr = (void **) if_->rsp;
+	// 포인터 크기만큼 내리고, 그 자리에 NULL -> fake return address
+	if_->rsp -= sizeof (void *);
+	* (void **) if_->rsp = NULL;
+
+	// main(argc, argv)를 미리 레지스터에 저장.
+	if_->R.rdi = argc;
+	if_->R.rsi = (uint64_t) argv_addr;
+
+	return true;
 }
 
 /* General process initializer for initd and other process. */
@@ -359,13 +408,11 @@ load (const char *file_name, struct intr_frame *if_) {
 	struct file *file = NULL;
 	off_t file_ofs;
 	bool success = false;
-	int i;						// ELF 로딩 반복문 + argument passing 반복문에서 재사용
+	int i;						// ELF 로딩 반복문
 
 	char *cmdline_copy = NULL;   // 명령줄 복사본
 
 	char *argv_kern[MAX_ARGS];   // 커널 영역에서 임시로 들고 있는 인자 문자열 주소들
-	char *argv_user[MAX_ARGS];   // 유저 스택에 복사된 각 인자 문자열의 주소들
-	char **argv_addr;            // 유저 스택에 만들어진 argv 배열의 시작 주소
 	int argc;                    // 인자 개수
 
 	/* Allocate and activate page directory. */
@@ -469,7 +516,6 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Set up stack. */
 	if (!setup_stack (if_))
 		goto done;
-
 	/* Start address. */
 	if_->rip = ehdr.e_entry;
 
@@ -478,44 +524,9 @@ load (const char *file_name, struct intr_frame *if_) {
 	
 	/* 커널에 저장된 문자열을 유저 스택에 옮기는 과정 
 	 * 마지막 인자부터 역순으로 넣는다. 왜? 그것이 스택이니까. */
-	for (i = argc - 1; i >= 0; i--) {
-		// 실제 문자열의 길이는 마지막에 \0이 포함된다. 그래서 +1
-		size_t len = strlen (argv_kern[i]) + 1;
-
-		// 스택에 저 문자열 길이만큼 넣기 위해서 포인터를 길이만큼 내린다.
-		if_->rsp -= len;
-		// 커널에 있는 문자열을 방금 만든 공간에 넣는다.
-		memcpy ((void *) if_->rsp, argv_kern[i], len);
-		// 유저 스택에 복사된 문자열의 시작 주소를 저장
-		argv_user[i] = (void *) if_->rsp;
+	if (!push_args_to_stack(if_, argv_kern, argc)) {
+		goto done;
 	}
-
-	// 8바이트 단위로 맞춰주기 위해서 포인터를 내리며 0을 채운다.
-	while (if_->rsp % 8 != 0) {
-		if_->rsp--;
-		*(uint8_t *) if_->rsp = 0;
-	}
-
-	/* 일반적인 함수 호출이라면 스택에 복귀 주소 자리가 있는데, 커널이 유저 프로그램을 실행시켜서
-	 * 복귀 주소 자리가 없어서, 그 자리를 가짜로 채워 넣는데, 그 값이 NULL 이다. */
-	if_->rsp -= sizeof (void *);
-	*(void **) if_->rsp = NULL;
-
-	/* i번째 문자열을 현재 스택 위치에 저장한다.*/
-	for (i = argc-1; i >= 0; i--) {
-		if_->rsp -= sizeof (void *);
-		*(void **) if_->rsp = argv_user[i];
-	}
-
-	// 현재 스택 위치를 저장
-	argv_addr = (void **) if_->rsp;
-	// 포인터 크기만큼 내리고, 그 자리에 NULL -> fake return address
-	if_->rsp -= sizeof (void *);
-	* (void **) if_->rsp = NULL;
-
-	// main(argc, argv)를 미리 레지스터에 저장.
-	if_->R.rdi = argc;
-	if_->R.rsi = (uint64_t) argv_addr;
 
 	// 여기까지 왔다면 성공했다는 거니까 true 처리.
 	success = true;

@@ -1,1 +1,7 @@
-halt FAIL
+args-dbl-space PASS
+args-multiple PASS
+args-none PASS
+halt PASS
+exit PASS
+args-many PASS
+args-single PASS
