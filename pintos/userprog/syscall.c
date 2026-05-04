@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
+#include "threads/init.h"
 #include "threads/thread.h"
 #include "threads/loader.h"
 #include "userprog/gdt.h"
@@ -49,7 +50,7 @@ syscall_handler (struct intr_frame *f) {
 			 * Pintos 자체를 종료하는 시스템콜이다. */
 			power_off();
 			break;
-		
+
 		case SYS_EXIT:
 			/* exit()는 현재 유저 프로그램을 종료한다.
 			 * 지금 첫 단계에서는 간단히 thread_exit()만 호출한다. */
@@ -57,12 +58,12 @@ syscall_handler (struct intr_frame *f) {
 			thread_exit();
 			break;
 
-		case SYS_WRITE:
+		case SYS_WRITE: {
 			/* write(fd, buffer, size)의 세 인자는
 			 * 첫 번째부터 차례로 rdi, rsi, rdx에 들어온다. */
-			int fd = f->R.rdi;
-			void *buffer = f->R.rsi;
-			int size = f->R.rdx;
+			int fd = (int) f->R.rdi;
+			const void *buffer = (const void *) f->R.rsi;
+			unsigned size = (unsigned) f->R.rdx;
 
 			if(fd == 1) {
 				/* fd == 1은 stdout이므로
@@ -79,12 +80,15 @@ syscall_handler (struct intr_frame *f) {
 				f->R.rax = -1;
 			}
 			break;
+		}
 
 		default:
 			/* 아직 구현하지 않은 syscall 번호가 들어오면
 			 * 우선 현재 프로세스를 종료한다. */
+			thread_current ()->exit_status = -1;
 			thread_exit();
 			break;
 	}
-	
+	// printf ("system call!\n");
+	// thread_exit ();
 }
