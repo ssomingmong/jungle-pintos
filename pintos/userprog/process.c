@@ -117,9 +117,8 @@ tid_t
 process_create_initd (const char *file_name) {
 	char *fn_copy;
 	tid_t tid;
-	
-	char thread_name[16];
 	char *save_ptr;
+	char thread_name[16];
 
 	char thread_name[16];
 	char *save_ptr;
@@ -131,7 +130,8 @@ process_create_initd (const char *file_name) {
 	strlcpy (fn_copy, file_name, PGSIZE);
 
 	strlcpy (thread_name, file_name, sizeof thread_name);
-	strtok_r(thread_name, " ", &save_ptr);
+	strtok_r (thread_name, " ", &save_ptr);
+
 	/* Create a new thread to execute FILE_NAME. */
 	tid = thread_create (thread_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
@@ -359,6 +359,8 @@ process_activate (struct thread *next) {
 #define PF_X 1          /* Executable. */
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
+
+#define MAX_ARGS 64
 
 /* Executable header.  See [ELF1] 1-4 to 1-8.
  * This appears at the very beginning of an ELF binary. */
@@ -613,6 +615,8 @@ token = strtok_r(cmdline_copy, " ", &save_ptr);
 
 	// 여기까지 왔다면 성공했다는 거니까 true 처리.
 	success = true;
+	
+	palloc_free_page(cmdline_copy); // cmdline_copy 해제
 
 done:
 	/* We arrive here whether the load is successful or not. */
