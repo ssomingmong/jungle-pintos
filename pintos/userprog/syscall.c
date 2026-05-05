@@ -10,8 +10,16 @@
 #include "intrinsic.h"
 #include "lib/kernel/stdio.h"
 
+#include "threads/vaddr.h"
+#include "threads/mmu.h"
+
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+
+static void sys_exit(int status);
+static void check_address(const void * addr);
+static void check_buffer(const void * buffer, unsigned size);
+static void check_string(const char * str);
 
 /* System call.
  *
@@ -54,8 +62,7 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_EXIT:
 			/* exit()는 현재 유저 프로그램을 종료한다.
 			 * 지금 첫 단계에서는 간단히 thread_exit()만 호출한다. */
-			printf ("%s: exit(%d)\n", thread_current ()->name, f->R.rdi);
-			thread_exit();
+			sys_exit((int)f->R.rdi);
 			break;
 
 		case SYS_WRITE: {
@@ -64,6 +71,7 @@ syscall_handler (struct intr_frame *f) {
 			int fd = (int) f->R.rdi;
 			const void *buffer = (const void *) f->R.rsi;
 			unsigned size = (unsigned) f->R.rdx;
+			check_buffer(buffer, size);
 
 			if(fd == 1) {
 				/* fd == 1은 stdout이므로
@@ -85,10 +93,54 @@ syscall_handler (struct intr_frame *f) {
 		default:
 			/* 아직 구현하지 않은 syscall 번호가 들어오면
 			 * 우선 현재 프로세스를 종료한다. */
-			thread_current ()->exit_status = -1;
-			thread_exit();
+			sys_exit(-1);
 			break;
 	}
 	// printf ("system call!\n");
 	// thread_exit ();
+}
+
+// 종료할 때 출력문
+static void sys_exit(int status) {
+	struct thread *cur = thread_current ();
+    cur->exit_status = status;
+    printf ("%s: exit(%d)\n", cur->name, status);
+    thread_exit ();
+}
+
+// 이 주소가 NULL 값인지, 유저 주소가 맞는지, 실제로 매핑되었는지 확인하는 함수
+static void check_address(const void * addr) {
+	struct thread *t = thread_current();
+
+	if (addr == NULL) {
+		sys_exit(-1);
+	}
+
+	if (!is_user_vaddr(addr)) {
+		sys_exit(-1);
+	}
+
+	if (pml4_get_page(t->pml4, addr) == NULL) {
+		sys_exit(-1);
+	}
+}
+
+// 버퍼를 돌면서 check_address
+static void check_buffer(const void * buffer, unsigned size) {
+	char *ptr = (char *)buffer;
+	char *end = ptr + size;
+	for (; ptr < end; ptr++) {
+		check_address(ptr);
+	}
+}
+
+// 문자열을 돌면서 check_address
+static void check_string(const char * str) {
+	while (1) {
+		check_address(str);
+		if (*str == '\0') {
+			return;
+		}
+		str = str + 1;
+	}
 }
