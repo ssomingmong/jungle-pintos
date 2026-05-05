@@ -39,6 +39,43 @@ syscall_init (void) {
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
 
+void
+exit_with_status(int status) { // exit_status 설정
+	thread_current()->exit_status = status;
+	thread_exit();
+}
+
+void
+check_address(void *addr) {
+	if (addr == NULL)
+		exit_with_status(-1);
+	if (is_user_vaddr(addr) == false)
+		exit_with_status(-1);
+	if (pml4_get_page(thread_current ()->pml4, addr) == NULL)
+		exit_with_status(-1);
+}
+
+void
+check_buffer (const void *buffer, unsigned size) {
+	char *buf = (char *)buffer;
+	int i ;
+	
+	for (i = 0; i < size; i++) {
+		check_address(buf + i);
+	}
+}
+
+void
+check_string (const char *str) {
+
+	while(1) {
+	check_address(str);
+	if (*str == '\0'){
+		break;}
+	str++; // 한 칸 앞으로 이동
+	}
+}
+
 /* The main system call interface */
 void
 syscall_handler (struct intr_frame *f) {
@@ -54,8 +91,7 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_EXIT:
 			/* exit()는 현재 유저 프로그램을 종료한다.
 			 * 지금 첫 단계에서는 간단히 thread_exit()만 호출한다. */
-			printf ("%s: exit(%d)\n", thread_current ()->name, f->R.rdi);
-			thread_exit();
+			exit_with_status((int)f->R.rdi);
 			break;
 
 		case SYS_WRITE: {
@@ -64,6 +100,7 @@ syscall_handler (struct intr_frame *f) {
 			int fd = (int) f->R.rdi;
 			const void *buffer = (const void *) f->R.rsi;
 			unsigned size = (unsigned) f->R.rdx;
+			check_buffer(buffer, size);
 
 			if(fd == 1) {
 				/* fd == 1은 stdout이므로
@@ -85,8 +122,9 @@ syscall_handler (struct intr_frame *f) {
 		default:
 			/* 아직 구현하지 않은 syscall 번호가 들어오면
 			 * 우선 현재 프로세스를 종료한다. */
-			thread_current ()->exit_status = -1;
-			thread_exit();
+			// thread_current()->exit_status = -1;
+			// printf ("%s: exit(%d)\n", thread_current ()->name, thread_current()->exit_status);
+			exit_with_status(-1);
 			break;
 	}
 	// printf ("system call!\n");
