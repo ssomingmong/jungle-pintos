@@ -16,7 +16,7 @@
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
-static void sys_exit(int status);
+void sys_exit(int status);
 static void check_address(const void * addr);
 static void check_buffer(const void * buffer, unsigned size);
 static void check_string(const char * str);
@@ -101,7 +101,7 @@ syscall_handler (struct intr_frame *f) {
 }
 
 // 종료할 때 출력문
-static void sys_exit(int status) {
+void sys_exit(int status) {
 	struct thread *cur = thread_current ();
     cur->exit_status = status;
     printf ("%s: exit(%d)\n", cur->name, status);
