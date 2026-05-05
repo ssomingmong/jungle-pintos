@@ -30,11 +30,11 @@ void check_address(const void *addr) {
 
 /* 버퍼 전체 범위(시작~끝)가 안전한지 검사 */
 void check_buffer(void *buffer, int size) {
-	if(size == 0)
-		check_address(buffer);
-	else {
-		check_address(buffer);
-		check_address(buffer + size - 1);
+	(char*)buffer;
+	char* bf_end = buffer + size - 1;
+	
+	for(;buffer <= bf_end; buffer++) {
+		check_address(buffer);		
 	}
 }
 
