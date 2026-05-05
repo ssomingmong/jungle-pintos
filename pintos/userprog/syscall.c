@@ -12,6 +12,9 @@
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
 
+#include "threads/vaddr.h"
+#include "threads/mmu.h"
+
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
@@ -169,6 +172,7 @@ syscall_handler (struct intr_frame *f) {
 			int fd = (int) f->R.rdi;
 			const void *buffer = (const void *) f->R.rsi;
 			unsigned size = (unsigned) f->R.rdx;
+			check_buffer(buffer, size);
 
 			// 유저가 넘긴 buffer부터 size 바이트까지 모두 안전한지 검사
 			check_buffer (buffer, size);
