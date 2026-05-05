@@ -140,6 +140,13 @@ page_fault (struct intr_frame *f) {
 	write = (f->error_code & PF_W) != 0;
 	user = (f->error_code & PF_U) != 0;
 
+	// 유저 모드에서 잘못된 메모리 접근이 발생하면 현재 프로세스를 -1로 종료
+	if (user)
+	{
+		thread_current ()-> exit_status = -1;
+		thread_exit ();
+	}
+
 #ifdef VM
 	/* For project 3 and later. */
 	if (vm_try_handle_fault (f, fault_addr, user, write, not_present))
