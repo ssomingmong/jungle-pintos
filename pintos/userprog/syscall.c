@@ -15,6 +15,38 @@
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
+/* exit_status 저장 후 스레드 종료 */
+void exit_with_status(int status){
+	thread_current()->exit_status = status;
+	thread_exit();
+}
+
+/* 주소 하나가 안전한지 검사 — NULL, 커널 영역, 미매핑 주소면 종료 */
+void check_address(const void *addr) {
+	if(addr == NULL || is_user_vaddr(addr) == 0 || pml4_get_page(thread_current()->pml4, addr) == NULL) {
+		exit_with_status(-1);
+	}
+}
+
+/* 버퍼 전체 범위(시작~끝)가 안전한지 검사 */
+void check_buffer(void *buffer, int size) {
+	(char*)buffer;
+	char* bf_end = buffer + size - 1;
+	
+	for(;buffer <= bf_end; buffer++) {
+		check_address(buffer);		
+	}
+}
+
+/* 문자열이 '\0'까지 전부 안전한지 한 글자씩 검사 */
+void check_string(const char *str) {
+	if(str == NULL)
+		exit_with_status(-1);
+	while(*str != '\0') {
+		check_address(str);
+		str++;
+	}
+}
 /* System call.
  *
  * Previously system call services was handled by the interrupt handler
@@ -127,9 +159,8 @@ syscall_handler (struct intr_frame *f) {
 			break;
 
 		case SYS_EXIT:
-			/* exit()는 현재 유저 프로그램을 종료한다.
-			 * 지금 첫 단계에서는 간단히 thread_exit()만 호출한다. */
-			exit_process ((int) f->R.rdi);
+			/* exit()는 현재 유저 프로그램을 종료한다. */
+			exit_with_status(f->R.rdi);
 			break;
 
 		case SYS_WRITE: {
@@ -162,8 +193,7 @@ syscall_handler (struct intr_frame *f) {
 		default:
 			/* 아직 구현하지 않은 syscall 번호가 들어오면
 			 * 우선 현재 프로세스를 종료한다. */
-			thread_current ()->exit_status = -1;
-			thread_exit();
+			exit_with_status(-1);
 			break;
 	}
 	// printf ("system call!\n");
