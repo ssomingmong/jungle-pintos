@@ -13,7 +13,7 @@ priority-donate-one PASS
 dup2-simple FAIL
 create-normal FAIL
 priority-donate-lower PASS
-bad-write FAIL
+bad-write PASS
 open-twice FAIL
 exec-missing FAIL
 exec-arg FAIL
@@ -37,7 +37,7 @@ priority-donate-multiple2 PASS
 open-empty FAIL
 open-null FAIL
 sm-seq-random FAIL
-bad-write2 FAIL
+bad-write2 PASS
 sm-seq-block FAIL
 multi-recurse FAIL
 alarm-priority PASS
@@ -56,7 +56,7 @@ exec-boundary FAIL
 close-normal FAIL
 sm-create FAIL
 halt PASS
-write-bad-fd FAIL
+write-bad-fd PASS
 sm-random FAIL
 alarm-zero PASS
 open-boundary FAIL
@@ -64,7 +64,7 @@ create-null FAIL
 fork-recursive FAIL
 open-bad-ptr FAIL
 write-normal FAIL
-bad-read FAIL
+bad-read PASS
 multi-oom FAIL
 fork-once FAIL
 priority-change PASS
@@ -86,12 +86,12 @@ write-zero FAIL
 alarm-multiple PASS
 create-exists FAIL
 open-normal FAIL
-bad-jump FAIL
-bad-jump2 FAIL
+bad-jump PASS
+bad-jump2 PASS
 open-missing FAIL
 create-empty FAIL
 args-single PASS
-write-stdin FAIL
+write-stdin PASS
 read-zero FAIL
-bad-read2 FAIL
+bad-read2 PASS
 syn-read FAIL

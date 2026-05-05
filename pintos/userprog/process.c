@@ -222,12 +222,17 @@ process_exit (void) {
 	 * TODO: Implement process termination message (see
 	 * TODO: project2/process_termination.html).
 	 * TODO: We recommend you to implement process resource cleanup here. */
+
+	// 유저 프로세스인 경우에만 종료 메시지를 출력
 	if (curr->pml4 != NULL)
-		printf ("%s: exit(%d)\n", thread_current ()->name, curr->exit_status);
+	{
+		printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
+	}
+
 	process_cleanup ();
 }
 
-/* Free the current process's resources. */
+/* Free t1he current process's resources. */
 static void
 process_cleanup (void) {
 	struct thread *curr = thread_current ();
