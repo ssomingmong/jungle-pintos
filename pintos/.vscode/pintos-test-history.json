@@ -1,8 +1,8 @@
 {
   "userprog": {
     "tests/userprog/args-none": {
-      "count": 14,
-      "last_used": 1777969829.305,
+      "count": 15,
+      "last_used": 1778050848.922,
       "last_action": "run"
     },
     "tests/userprog/args-single": {
@@ -100,34 +100,9 @@
       "last_used": 1777983333.426,
       "last_action": "run"
     },
-    "tests/userprog/create-empty": {
-      "count": 2,
-      "last_used": 1778049097.718,
-      "last_action": "run"
-    },
-    "tests/userprog/create-null": {
-      "count": 2,
-      "last_used": 1778049097.718,
-      "last_action": "run"
-    },
     "tests/userprog/create-bad-ptr": {
       "count": 2,
-      "last_used": 1778049097.718,
-      "last_action": "run"
-    },
-    "tests/userprog/create-long": {
-      "count": 2,
-      "last_used": 1778049097.718,
-      "last_action": "run"
-    },
-    "tests/userprog/create-exists": {
-      "count": 2,
-      "last_used": 1778049097.718,
-      "last_action": "run"
-    },
-    "tests/userprog/create-bound": {
-      "count": 2,
-      "last_used": 1778049097.718,
+      "last_used": 1778050767.365,
       "last_action": "run"
     }
   }
