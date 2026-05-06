@@ -11,8 +11,9 @@
 #include "lib/kernel/stdio.h"
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
-
 #include "filesys/filesys.h"
+#include "threads/synch.h"
+
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -34,27 +35,20 @@ void check_address(const void *addr) {
 void check_buffer(void *buffer, int size) {
 	(char*)buffer;
 	char* bf_end = buffer + size - 1;
-	
+
 	for(;buffer <= bf_end; buffer++) {
-		check_address(buffer);		
+		check_address(buffer);
 	}
 }
 
 /* 문자열이 '\0'까지 전부 안전한지 한 글자씩 검사 */
-// 유저 포인터는 역참조하기 전에 먼저 검사한다.
 void check_string(const char *str) {
 	if(str == NULL)
 		exit_with_status(-1);
-
-	while (true) {
-		/* 현재 문자를 읽기 전에 먼저 주소가 안전한지 검사 */
-		check_address (str);
-
-		/* 현재 문자가 문자열 끝이면 검사 종료 */
-		if (*str == '\0')
+	while(1) {
+		check_address(str);
+		if(*str == '\0')
 			break;
-
-		/* 다음 문자로 이동 */
 		str++;
 	}
 }
@@ -71,6 +65,8 @@ void check_string(const char *str) {
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
+struct lock filesys_lock;
+
 void
 syscall_init (void) {
 	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48  |
@@ -82,6 +78,8 @@ syscall_init (void) {
 	 * mode stack. Therefore, we masked the FLAG_FL. */
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+
+	lock_init(&filesys_lock);
 }
 
 /* The main system call interface */
@@ -99,18 +97,6 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_EXIT:
 			/* exit()는 현재 유저 프로그램을 종료한다. */
 			exit_with_status(f->R.rdi);
-			break;
-
-		case SYS_CREATE:
-			const char *file_name;
-			unsigned size;
-
-			file_name = f->R.rdi;
-			size = f->R.rsi;
-
-			check_address(file_name);
-
-			f->R.rax = filesys_create(file_name, size);
 			break;
 
 		case SYS_WRITE: {
@@ -141,20 +127,20 @@ syscall_handler (struct intr_frame *f) {
 		}
 
 		case SYS_CREATE: {
-			/* create의 첫 번째 인자 file은 rdi에 들어옴 */
-			const char *file = (const char *) f->R.rdi;
+			// 1번째 인자(rdi): 생성할 파일 이름 (유저 포인터)
+			char *filename = (char *) f->R.rdi;
+			// 2번째 인자(rsi): 파일의 초기 크기 (바이트 단위)
+			unsigned size = (unsigned) f->R.rsi;
 
-			/* create의 두 번째 인자 initial_size는 rsi에 들어옴 */
-			unsigned initial_size = (unsigned) f->R.rsi;
-
-			/* 유저가 넘긴 파일 이름 문자열이 안전한지 먼저 검사 */
-			check_string (file);
-
-			/* 실제 파일 시스템에 파일 생성을 요청 */
-			bool success = filesys_create (file, initial_size);
-
-			/* create()의 반환값은 성공 true, 실패 false이므로 rax에 저장 */
-			f->R.rax = success;
+			// filename 포인터가 NULL이거나 커널 주소이거나 매핑 안 된 주소면 -1로 종료
+			// check_address(filename);
+			check_string(filename);
+			// 파일 시스템은 thread-safe하지 않으므로 락을 잡아 직렬화
+			lock_acquire(&filesys_lock);
+			// 실제 파일 생성 — 성공하면 true, 실패하면 false를 rax로 반환
+			f->R.rax = filesys_create(filename, size);
+			// 파일 시스템 작업 끝났으니 락 해제
+			lock_release(&filesys_lock);
 
 			break;
 		}
