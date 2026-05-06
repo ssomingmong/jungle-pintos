@@ -44,8 +44,10 @@ void check_buffer(void *buffer, int size) {
 void check_string(const char *str) {
 	if(str == NULL)
 		exit_with_status(-1);
-	while(*str != '\0') {
+	while(1) {
 		check_address(str);
+		if(*str == '\0')
+			break;
 		str++;
 	}
 }
@@ -124,20 +126,20 @@ syscall_handler (struct intr_frame *f) {
 		}
 
 		case SYS_CREATE: {
-			// rdi에 담긴 파일 이름 포인터를 char*로 꺼냄
+			// 1번째 인자(rdi): 생성할 파일 이름 (유저 포인터)
 			char *filename = (char *) f->R.rdi;
-			// rsi에 담긴 파일 초기 크기를 unsigned로 꺼냄
+			// 2번째 인자(rsi): 파일의 초기 크기 (바이트 단위)
 			unsigned size = (unsigned) f->R.rsi;
 
-			// 유저가 넘긴 포인터가 NULL이거나 커널 주소거나 매핑 안 된 주소면 프로세스 종료
-			check_address(filename);
-
-			// filesys_create는 thread-safe하지 않아서 동시에 여러 스레드가 접근하면 문제가 생김
-			// 락을 잡아서 한 번에 하나의 스레드만 파일 시스템에 접근하도록 막음
+			// filename 포인터가 NULL이거나 커널 주소이거나 매핑 안 된 주소면 -1로 종료
+			// check_address(filename);
+			check_string(filename);
+			// 파일 시스템은 thread-safe하지 않으므로 락을 잡아 직렬화
 			lock_acquire(&filesys_lock);
-			// 실제 파일 생성, 성공하면 true 실패하면 false가 rax(반환값)에 담김
+			// 실제 파일 생성 — 성공하면 true, 실패하면 false를 rax로 반환
 			f->R.rax = filesys_create(filename, size);
-			lock_release(&filesys_lock);               // 파일 시스템 작업이 끝났으니 락 해제
+			// 파일 시스템 작업 끝났으니 락 해제
+			lock_release(&filesys_lock);
 
 			break;
 		}
