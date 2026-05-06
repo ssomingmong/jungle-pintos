@@ -12,9 +12,6 @@
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
 
-#include "threads/vaddr.h"
-#include "threads/mmu.h"
-
 #include "filesys/filesys.h"
 
 void syscall_entry (void);
