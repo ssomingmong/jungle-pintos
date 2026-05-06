@@ -101,6 +101,18 @@ syscall_handler (struct intr_frame *f) {
 			exit_with_status(f->R.rdi);
 			break;
 
+		case SYS_CREATE:
+			const char *file_name;
+			unsigned size;
+
+			file_name = f->R.rdi;
+			size = f->R.rsi;
+
+			check_address(file_name);
+
+			f->R.rax = filesys_create(file_name, size);
+			break;
+
 		case SYS_WRITE: {
 			/* write(fd, buffer, size)의 세 인자는
 			 * 첫 번째부터 차례로 rdi, rsi, rdx에 들어온다. */
