@@ -11,9 +11,8 @@
 #include "lib/kernel/stdio.h"
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
-
-#include "threads/vaddr.h"
-#include "threads/mmu.h"
+#include "filesys/filesys.h"
+#include "threads/synch.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -35,9 +34,9 @@ void check_address(const void *addr) {
 void check_buffer(void *buffer, int size) {
 	(char*)buffer;
 	char* bf_end = buffer + size - 1;
-	
+
 	for(;buffer <= bf_end; buffer++) {
-		check_address(buffer);		
+		check_address(buffer);
 	}
 }
 
@@ -63,6 +62,8 @@ void check_string(const char *str) {
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
 
+struct lock filesys_lock;
+
 void
 syscall_init (void) {
 	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48  |
@@ -74,6 +75,8 @@ syscall_init (void) {
 	 * mode stack. Therefore, we masked the FLAG_FL. */
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+
+	lock_init(&filesys_lock);
 }
 
 /* The main system call interface */
@@ -117,6 +120,25 @@ syscall_handler (struct intr_frame *f) {
 				 * 다른 fd는 실패로 처리한다. */
 				f->R.rax = -1;
 			}
+			break;
+		}
+
+		case SYS_CREATE: {
+			// rdi에 담긴 파일 이름 포인터를 char*로 꺼냄
+			char *filename = (char *) f->R.rdi;
+			// rsi에 담긴 파일 초기 크기를 unsigned로 꺼냄
+			unsigned size = (unsigned) f->R.rsi;
+
+			// 유저가 넘긴 포인터가 NULL이거나 커널 주소거나 매핑 안 된 주소면 프로세스 종료
+			check_address(filename);
+
+			// filesys_create는 thread-safe하지 않아서 동시에 여러 스레드가 접근하면 문제가 생김
+			// 락을 잡아서 한 번에 하나의 스레드만 파일 시스템에 접근하도록 막음
+			lock_acquire(&filesys_lock);
+			// 실제 파일 생성, 성공하면 true 실패하면 false가 rax(반환값)에 담김
+			f->R.rax = filesys_create(filename, size);
+			lock_release(&filesys_lock);               // 파일 시스템 작업이 끝났으니 락 해제
+
 			break;
 		}
 
