@@ -1,9 +1,9 @@
-exec-bad-ptr FAIL
+exec-bad-ptr PASS
 sm-full FAIL
 rox-simple FAIL
 fork-multiple FAIL
 args-dbl-space PASS
-read-bad-fd FAIL
+read-bad-fd PASS
 priority-donate-multiple PASS
 args-multiple PASS
 lg-seq-random FAIL
@@ -35,7 +35,7 @@ alarm-single PASS
 read-normal FAIL
 priority-donate-multiple2 PASS
 open-empty FAIL
-open-null FAIL
+open-null PASS
 sm-seq-random FAIL
 bad-write2 PASS
 sm-seq-block FAIL
@@ -46,7 +46,7 @@ args-none PASS
 create-bad-ptr PASS
 read-stdout FAIL
 priority-fifo PASS
-wait-bad-pid FAIL
+wait-bad-pid PASS
 lg-create FAIL
 exec-read FAIL
 priority-sema PASS
@@ -62,7 +62,7 @@ alarm-zero PASS
 open-boundary FAIL
 create-null PASS
 fork-recursive FAIL
-open-bad-ptr FAIL
+open-bad-ptr PASS
 write-normal FAIL
 bad-read PASS
 multi-oom FAIL
@@ -71,11 +71,11 @@ priority-change PASS
 write-boundary FAIL
 wait-killed FAIL
 lg-full FAIL
-close-bad-fd FAIL
+close-bad-fd PASS
 alarm-negative PASS
 multi-child-fd FAIL
 exit PASS
-write-bad-ptr FAIL
+write-bad-ptr PASS
 priority-donate-sema PASS
 lg-seq-block FAIL
 wait-simple FAIL
