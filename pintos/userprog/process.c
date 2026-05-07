@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "userprog/gdt.h"
+#include "userprog/syscall.h"
 #include "userprog/tss.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
@@ -14,6 +15,7 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
@@ -227,6 +229,17 @@ process_exit (void) {
 	if (curr->pml4 != NULL)
 	{
 		printf ("%s: exit(%d)\n", curr->name, curr->exit_status);
+	}
+
+	/* 프로세스가 종료되면 fd 테이블에 남아 있는 파일을 모두 닫는다.
+	   close()를 직접 호출하지 않고 종료되는 프로그램도 파일 자원을 반납해야 한다. */
+	for (int fd = 2; fd < MAX_FD; fd++) {
+		if (curr->fd_table[fd] != NULL) {
+			lock_acquire (&filesys_lock);
+			file_close (curr->fd_table[fd]);
+			lock_release (&filesys_lock);
+			curr->fd_table[fd] = NULL;
+		}
 	}
 
 	process_cleanup ();

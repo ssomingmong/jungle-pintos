@@ -467,6 +467,10 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->wait_on_lock = NULL;
 	list_init (&t->donations);
 
+#ifdef USERPROG
+	t->next_fd = 2;
+#endif
+
 	t->magic = THREAD_MAGIC;
 }
 

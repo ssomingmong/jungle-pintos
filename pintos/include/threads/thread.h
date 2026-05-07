@@ -9,6 +9,9 @@
 #include "vm/vm.h"
 #endif
 
+struct file;
+
+#define MAX_FD 128
 
 /* States in a thread's life cycle. */
 enum thread_status {
@@ -108,6 +111,11 @@ struct thread {
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
+
+	/* 프로세스가 열어 둔 파일들을 fd 번호로 찾기 위한 테이블.
+	   fd 0은 stdin, fd 1은 stdout으로 예약하고 일반 파일은 fd 2부터 쓴다. */
+	struct file *fd_table[MAX_FD];
+	int next_fd;
 #endif
 #ifdef VM
 	/* Table for whole virtual memory owned by thread. */
